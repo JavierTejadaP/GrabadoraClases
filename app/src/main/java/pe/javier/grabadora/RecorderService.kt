@@ -13,23 +13,36 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.IBinder
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.os.StatFs
 import android.os.PowerManager
+import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.Toast
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Graba en primer plano (notificación fija) para que MIUI/HyperOS no la cierre.
  * Formato AAC-ADTS: si algo falla a mitad de clase, el archivo queda válido hasta ese punto.
+ * Las pantallas siguen el estado con [flujo] en vez de preguntar a cada rato.
  */
 class RecorderService : Service() {
 
     enum class Estado { DETENIDO, GRABANDO, PAUSADO }
+
+    /** Lo que las pantallas necesitan mostrar. Cambia solo cuando pasa algo. */
+    data class Instantanea(
+        val estado: Estado = Estado.DETENIDO,
+        val titulo: String = "",
+        val advertencia: String? = null,
+        val numMarcas: Int = 0,
+        val ultimoArchivo: String? = null,
+    )
 
     companion object {
         const val ACT_START = "pe.javier.grabadora.START"
@@ -39,6 +52,8 @@ class RecorderService : Service() {
         const val ACT_STOP = "pe.javier.grabadora.STOP"
         const val EXTRA_NOMBRE = "nombre"
         const val EXTRA_TITULO = "titulo"
+        const val EXTRA_CURSO_ID = "curso_id"
+        const val EXTRA_TIPO = "tipo"
         const val CARPETA = "GrabadoraClases"
 
         private const val CANAL = "grabacion"
@@ -52,18 +67,16 @@ class RecorderService : Service() {
         private const val ESPACIO_AVISO = 300 * MB
         private const val ESPACIO_MINIMO = 30 * MB
 
-        @Volatile var estado = Estado.DETENIDO
-            private set
-        @Volatile var titulo = ""
-            private set
-        @Volatile var ultimoArchivo: String? = null
-            private set
+        private val _flujo = MutableStateFlow(Instantanea())
+        val flujo: StateFlow<Instantanea> = _flujo
+
+        /** Error para mostrar una vez; la pantalla que lo muestra lo vuelve a poner en null. */
+        val error = MutableStateFlow<String?>(null)
+
+        val estado: Estado get() = _flujo.value.estado
+
         /** Archivo que se está grabando ahora (para no mostrarlo/borrarlo en la lista). */
         @Volatile var archivoActual: String? = null
-            private set
-        @Volatile var error: String? = null
-        /** Aviso visible mientras se graba (p. ej. micrófono sin sonido). */
-        @Volatile var advertencia: String? = null
             private set
 
         // Nivel de sonido (0..1) por tramos de 100 ms, alineado con el tiempo de grabación
@@ -106,7 +119,9 @@ class RecorderService : Service() {
             if (estado == Estado.GRABANDO) acumulado + (SystemClock.elapsedRealtime() - desde)
             else acumulado
 
-        fun numMarcas(): Int = synchronized(marcas) { marcas.size }
+        fun numMarcas(): Int = _flujo.value.numMarcas
+
+        private fun publicar(cambio: (Instantanea) -> Instantanea) = _flujo.update(cambio)
     }
 
     private var recorder: MediaRecorder? = null
@@ -155,7 +170,9 @@ class RecorderService : Service() {
         when (intent?.action) {
             ACT_START -> iniciar(
                 intent.getStringExtra(EXTRA_NOMBRE) ?: "Grabacion",
-                intent.getStringExtra(EXTRA_TITULO) ?: ""
+                intent.getStringExtra(EXTRA_TITULO) ?: "",
+                Horario.curso(intent.getLongExtra(EXTRA_CURSO_ID, -1L)),
+                intent.getStringExtra(EXTRA_TIPO),
             )
             ACT_PAUSE -> pausar()
             ACT_RESUME -> reanudar()
@@ -169,7 +186,7 @@ class RecorderService : Service() {
     override fun onDestroy() {
         if (estado != Estado.DETENIDO) {
             // El sistema cerró el servicio a mitad de clase
-            avisar("La grabación se detuvo", "El sistema cerró la grabadora. Lo grabado hasta ahora está guardado.")
+            avisar(getString(R.string.aviso_detenida_titulo), getString(R.string.aviso_detenida_sistema))
             detener(pararServicio = false)
         }
         handler.removeCallbacksAndMessages(null)
@@ -180,8 +197,8 @@ class RecorderService : Service() {
 
     private fun revisarSonido(amp: Int) {
         if (amp > 0) {
-            if (advertencia != null) {
-                advertencia = null
+            if (_flujo.value.advertencia != null) {
+                publicar { it.copy(advertencia = null) }
                 cancelarAviso()
                 actualizarNotif()
             }
@@ -190,11 +207,8 @@ class RecorderService : Service() {
         }
         segSinSonido++
         if (segSinSonido == SEG_SILENCIO) {
-            advertencia = "No se capta sonido"
-            avisar(
-                "No se está captando sonido",
-                "Otra app (una llamada, WhatsApp, otra grabadora) puede estar usando el micrófono. La grabación sigue, pero ese tramo queda en silencio."
-            )
+            publicar { it.copy(advertencia = getString(R.string.advertencia_sin_sonido)) }
+            avisar(getString(R.string.aviso_sin_sonido_titulo), getString(R.string.aviso_sin_sonido_texto))
             actualizarNotif()
         }
     }
@@ -205,12 +219,15 @@ class RecorderService : Service() {
     private fun revisarEspacio() {
         val libre = espacioLibre()
         if (libre < ESPACIO_MINIMO) {
-            error = "Se detuvo por falta de espacio. Lo grabado está guardado."
-            avisar("La grabación se detuvo", "El celular se quedó sin espacio. Lo grabado hasta ahora está guardado.")
+            error.value = getString(R.string.error_sin_espacio_detenida)
+            avisar(getString(R.string.aviso_detenida_titulo), getString(R.string.aviso_detenida_espacio))
             detener()
         } else if (libre < ESPACIO_AVISO && !avisoEspacio) {
             avisoEspacio = true
-            avisar("Poco espacio en el celular", "Quedan ${libre / MB} MB. Alcanza para aprox. ${libre / MB / 21} h más de grabación.")
+            avisar(
+                getString(R.string.aviso_poco_espacio_titulo),
+                getString(R.string.aviso_poco_espacio_texto, libre / MB, libre / MB / 21)
+            )
         }
     }
 
@@ -218,7 +235,7 @@ class RecorderService : Service() {
     private fun avisar(tituloAviso: String, texto: String) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CANAL_ALERTA, "Alertas de grabación", NotificationManager.IMPORTANCE_HIGH)
+            NotificationChannel(CANAL_ALERTA, getString(R.string.canal_alertas), NotificationManager.IMPORTANCE_HIGH)
         )
         val abrir = PendingIntent.getActivity(
             this, 5, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -243,31 +260,31 @@ class RecorderService : Service() {
 
     // ---------------- acciones ----------------
 
-    private fun iniciar(nombre: String, tituloNuevo: String) {
+    private fun iniciar(nombre: String, tituloNuevo: String, curso: Curso?, tipo: String?) {
         crearCanal()
         if (estado != Estado.DETENIDO) {
             // Doble toque en "Grabar": ya está grabando; solo se confirma el primer plano
             startForeground(NOTIF_ID, construirNotif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             return
         }
-        advertencia = null
         segSinSonido = 0
         avisoEspacio = false
         maxSegundo = 0
         limpiarNiveles()
-        titulo = tituloNuevo
         acumulado = 0L
         desde = SystemClock.elapsedRealtime()
         synchronized(marcas) { marcas.clear() }
         marcasUri = null
-        estado = Estado.GRABANDO
+        publicar {
+            it.copy(estado = Estado.GRABANDO, titulo = tituloNuevo, advertencia = null, numMarcas = 0)
+        }
 
         // Debe llamarse enseguida tras startForegroundService
         startForeground(NOTIF_ID, construirNotif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
 
         try {
             if (espacioLibre() < ESPACIO_MINIMO) {
-                throw IllegalStateException("No hay espacio en el celular. Libera espacio e intenta de nuevo.")
+                throw IllegalStateException(getString(R.string.error_sin_espacio))
             }
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, "$nombre.aac")
@@ -275,13 +292,14 @@ class RecorderService : Service() {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + CARPETA)
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: throw IllegalStateException("No se pudo crear el archivo")
+                ?: throw IllegalStateException(getString(R.string.error_crear_archivo))
             audioUri = uri
             val fd = contentResolver.openFileDescriptor(uri, "w")
-                ?: throw IllegalStateException("No se pudo abrir el archivo")
+                ?: throw IllegalStateException(getString(R.string.error_abrir_archivo))
             pfd = fd
             nombreReal = consultarNombre(uri) ?: "$nombre.aac"
             archivoActual = nombreReal
+            Biblioteca.registrar(this, nombreReal, uri, curso, if (curso == null) null else tipo)
 
             val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()
             r.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
@@ -292,8 +310,8 @@ class RecorderService : Service() {
             r.setAudioEncodingBitRate(48000)
             r.setOutputFile(fd.fileDescriptor)
             r.setOnErrorListener { _, what, extra ->
-                error = "Error del grabador ($what/$extra). Se guardó lo grabado."
-                avisar("La grabación se detuvo", "Hubo un error del micrófono. Lo grabado hasta ahora está guardado.")
+                error.value = getString(R.string.error_grabador, what, extra)
+                avisar(getString(R.string.aviso_detenida_titulo), getString(R.string.aviso_detenida_microfono))
                 detener()
             }
             r.prepare()
@@ -301,12 +319,12 @@ class RecorderService : Service() {
             recorder = r
             desde = SystemClock.elapsedRealtime()
         } catch (e: Exception) {
-            error = "No se pudo iniciar: ${e.message}"
+            error.value = getString(R.string.error_no_inicio, e.message ?: "")
             liberar()
-            audioUri?.let { runCatching { contentResolver.delete(it, null, null) } }
+            audioUri?.let { u -> runCatching { contentResolver.delete(u, null, null) } }
             audioUri = null
             archivoActual = null
-            estado = Estado.DETENIDO
+            publicar { it.copy(estado = Estado.DETENIDO) }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -326,11 +344,11 @@ class RecorderService : Service() {
         try {
             recorder?.pause()
         } catch (e: Exception) {
-            error = "No se pudo pausar: ${e.message}"
+            error.value = getString(R.string.error_pausar, e.message ?: "")
             return
         }
         acumulado += SystemClock.elapsedRealtime() - desde
-        estado = Estado.PAUSADO
+        publicar { it.copy(estado = Estado.PAUSADO) }
         actualizarNotif()
     }
 
@@ -339,12 +357,12 @@ class RecorderService : Service() {
         try {
             recorder?.resume()
         } catch (e: Exception) {
-            error = "No se pudo reanudar: ${e.message}"
+            error.value = getString(R.string.error_reanudar, e.message ?: "")
             return
         }
         desde = SystemClock.elapsedRealtime()
-        estado = Estado.GRABANDO
         segSinSonido = 0
+        publicar { it.copy(estado = Estado.GRABANDO) }
         actualizarNotif()
     }
 
@@ -355,24 +373,23 @@ class RecorderService : Service() {
             marcas.add(t)
             marcas.size
         }
+        publicar { it.copy(numMarcas = n) }
         escribirMarcas()
-        Toast.makeText(this, "Marca $n - ${Horario.fmt(t)}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.marca_n, n, Horario.fmt(t)), Toast.LENGTH_SHORT).show()
     }
 
     private fun detener(pararServicio: Boolean = true) {
         if (estado == Estado.DETENIDO) return
         if (estado == Estado.GRABANDO) acumulado += SystemClock.elapsedRealtime() - desde
-        estado = Estado.DETENIDO
         handler.removeCallbacks(vigilante)
-        advertencia = null
         try {
             recorder?.stop()
         } catch (_: Exception) {
         }
         liberar()
-        ultimoArchivo = nombreReal
         archivoActual = null
         audioUri = null
+        publicar { it.copy(estado = Estado.DETENIDO, advertencia = null, ultimoArchivo = nombreReal) }
         if (pararServicio) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -398,24 +415,20 @@ class RecorderService : Service() {
         try {
             if (marcasUri == null) {
                 val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, nombreReal.removeSuffix(".aac") + " - marcas.txt")
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, nombreReal.removeSuffix(".aac") + Biblioteca.SUFIJO_MARCAS)
                     put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + CARPETA)
                 }
                 marcasUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             }
-            val lista = synchronized(marcas) { marcas.toList() }
-            val texto = buildString {
-                appendLine(titulo)
-                appendLine(nombreReal)
-                appendLine()
-                lista.forEachIndexed { i, ms -> appendLine("Marca ${i + 1} - ${Horario.fmt(ms)}") }
-            }
+            val lista = marcasLista()
+            val texto = Biblioteca.textoMarcas(_flujo.value.titulo, nombreReal, lista)
             marcasUri?.let { u ->
                 contentResolver.openOutputStream(u, "wt")?.use { it.write(texto.toByteArray(Charsets.UTF_8)) }
             }
+            Biblioteca.actualizarMarcas(this, nombreReal, marcasUri, lista.size)
         } catch (e: Exception) {
-            error = "No se pudieron guardar las marcas: ${e.message}"
+            error.value = getString(R.string.error_guardar_marcas, e.message ?: "")
         }
     }
 
@@ -424,7 +437,7 @@ class RecorderService : Service() {
     private fun crearCanal() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CANAL, "Grabación", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CANAL, getString(R.string.canal_grabacion), NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -441,24 +454,25 @@ class RecorderService : Service() {
             Intent(this, GrabandoActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val grabando = estado == Estado.GRABANDO
+        val inst = _flujo.value
+        val grabando = inst.estado == Estado.GRABANDO
         val icono = Icon.createWithResource(this, R.drawable.ic_mic)
 
         val b = Notification.Builder(this, CANAL)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle(if (grabando) "● Grabando" else "❚❚ Pausado")
+            .setContentTitle(getString(if (grabando) R.string.notif_grabando else R.string.notif_pausado))
             .setContentIntent(abrir)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_SERVICE)
 
         if (grabando) {
-            b.setContentText(advertencia?.let { "⚠ $it · $titulo" } ?: titulo)
+            b.setContentText(inst.advertencia?.let { getString(R.string.aviso_con_titulo, it, inst.titulo) } ?: inst.titulo)
                 .setUsesChronometer(true)
                 .setShowWhen(true)
                 .setWhen(System.currentTimeMillis() - tiempoMs())
         } else {
-            b.setContentText("$titulo · ${Horario.fmt(tiempoMs())}")
+            b.setContentText(getString(R.string.titulo_con_tiempo, inst.titulo, Horario.fmt(tiempoMs())))
                 .setUsesChronometer(false)
                 .setShowWhen(false)
         }
@@ -466,12 +480,12 @@ class RecorderService : Service() {
         b.addAction(
             Notification.Action.Builder(
                 icono,
-                if (grabando) "Pausar" else "Reanudar",
+                getString(if (grabando) R.string.pausar else R.string.reanudar),
                 pi(if (grabando) ACT_PAUSE else ACT_RESUME, 1)
             ).build()
         )
-        b.addAction(Notification.Action.Builder(icono, "Marcar", pi(ACT_MARK, 2)).build())
-        b.addAction(Notification.Action.Builder(icono, "Detener", pi(ACT_STOP, 3)).build())
+        b.addAction(Notification.Action.Builder(icono, getString(R.string.marcar), pi(ACT_MARK, 2)).build())
+        b.addAction(Notification.Action.Builder(icono, getString(R.string.detener), pi(ACT_STOP, 3)).build())
 
         if (Build.VERSION.SDK_INT >= 31) {
             b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)

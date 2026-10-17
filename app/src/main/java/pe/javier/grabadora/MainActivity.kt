@@ -17,18 +17,23 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.format.DateFormat
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import pe.javier.grabadora.RecorderService.Estado
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
-
-    private val es = Locale.forLanguageTag("es-PE")
 
     private lateinit var tvFecha: TextView
     private lateinit var cardCurso: View
@@ -50,16 +55,17 @@ class MainActivity : Activity() {
     private lateinit var tvUltimo: TextView
 
     private val handler = Handler(Looper.getMainLooper())
+    private var scope: CoroutineScope? = null
     private var seleccion = 0
     private var eleccionManual = false
     private var opcionElegida: Opcion? = null
-    private var ultimoEstado: Estado? = null
     private var animPulso: ObjectAnimator? = null
 
-    private val tick = object : Runnable {
+    /** Solo mientras se graba: el reloj avanza cada segundo. */
+    private val reloj = object : Runnable {
         override fun run() {
-            refrescar()
-            handler.postDelayed(this, 300)
+            tvTiempo.text = Horario.fmt(RecorderService.tiempoMs())
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -88,7 +94,7 @@ class MainActivity : Activity() {
 
         cardCurso.setOnClickListener {
             if (RecorderService.estado == Estado.DETENIDO) elegirCurso()
-            else Toast.makeText(this, "No se puede cambiar el curso mientras grabas", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(this, R.string.no_cambiar_curso_grabando, Toast.LENGTH_SHORT).show()
         }
         btnIniciar.setOnClickListener {
             if (RecorderService.estado == Estado.DETENIDO) iniciar() else abrirGrabando()
@@ -104,16 +110,35 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.btnHorario).setOnClickListener { abrirHorario() }
     }
 
-    private fun abrirHorario() {
-        startActivity(Intent(this, HorarioActivity::class.java))
+    override fun onStart() {
+        super.onStart()
+        val s = MainScope()
+        scope = s
+        s.launch { RecorderService.flujo.collect { pintar(it) } }
+        s.launch {
+            RecorderService.error.collect { e ->
+                if (e != null) {
+                    Toast.makeText(this@MainActivity, e, Toast.LENGTH_LONG).show()
+                    RecorderService.error.value = null
+                }
+            }
+        }
+        s.launch {
+            val n = withContext(Dispatchers.IO) { Biblioteca.cargar(applicationContext).size }
+            tvResumen.text = if (n == 0) getString(R.string.sin_grabaciones)
+            else resources.getQuantityString(R.plurals.grabaciones_guardadas, n, n)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        tvFecha.text = SimpleDateFormat("EEEE d 'de' MMMM", es).format(Date()).replaceFirstChar { it.titlecase(es) }
+        val patron = DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEEdMMMM")
+        tvFecha.text = SimpleDateFormat(patron, Locale.getDefault()).format(Date())
+            .replaceFirstChar { it.titlecase(Locale.getDefault()) }
         // El horario pudo cambiar en "Mi horario": se vuelve a ubicar la clase elegida
         if (eleccionManual) {
-            val i = opcionElegida?.let { Horario.opciones.indexOf(it) } ?: -1
+            val e = opcionElegida
+            val i = Horario.opciones.indexOfFirst { it.curso?.id == e?.curso?.id && it.tipo == e?.tipo }
             if (i >= 0) seleccion = i else eleccionManual = false
         }
         if (RecorderService.estado == Estado.DETENIDO && !eleccionManual) {
@@ -121,43 +146,42 @@ class MainActivity : Activity() {
         }
         seleccion = seleccion.coerceIn(0, Horario.opciones.size - 1)
         mostrarCurso()
-        val n = Biblioteca.cargar(this).size
-        tvResumen.text = when (n) {
-            0 -> "Aún no tienes grabaciones"
-            1 -> "1 grabación guardada"
-            else -> "$n grabaciones guardadas"
-        }
-        ultimoEstado = null
-        handler.post(tick)
     }
 
-    override fun onPause() {
-        super.onPause()
-        handler.removeCallbacks(tick)
-        animPulso?.cancel()
-        animPulso = null
+    override fun onStop() {
+        scope?.cancel()
+        scope = null
+        handler.removeCallbacks(reloj)
+        detenerPulso()
+        super.onStop()
+    }
+
+    private fun abrirHorario() {
+        startActivity(Intent(this, HorarioActivity::class.java))
     }
 
     // ---------------- curso ----------------
 
     private fun mostrarCurso() {
-        val o = Horario.opciones[seleccion]
+        val o = Horario.opciones.getOrElse(seleccion) { Horario.opciones[0] }
         val ahora = Horario.detectar()
-        tvCursoLabel.text = when {
-            o.curso == null -> "SIN CURSO"
-            ahora?.curso == o.curso && ahora.tipo == o.tipo -> "AHORA EN CLASE"
-            else -> "CURSO ELEGIDO"
-        }
-        tvCurso.text = o.curso ?: "Grabación libre"
-        tvTipo.text = o.tipo ?: "Se guarda con fecha y hora"
-        tvIniciales.text = Horario.iniciales(o.curso)
+        tvCursoLabel.setText(
+            when {
+                o.curso == null -> R.string.etiqueta_sin_curso
+                ahora?.curso?.id == o.curso.id && ahora.tipo == o.tipo -> R.string.etiqueta_ahora_en_clase
+                else -> R.string.etiqueta_curso_elegido
+            }
+        )
+        tvCurso.text = o.curso?.nombre ?: getString(R.string.grabacion_libre)
+        tvTipo.text = if (o.curso == null) getString(R.string.se_guarda_fecha_hora) else Horario.etiquetaTipo(this, o.tipo)
+        tvIniciales.text = Horario.iniciales(o.curso?.nombre)
         tvIniciales.backgroundTintList = ColorStateList.valueOf(Horario.color(o.curso))
     }
 
     private fun elegirCurso() {
-        val etiquetas = Horario.opciones.map { it.etiqueta }.toTypedArray()
+        val etiquetas = Horario.opciones.map { Horario.etiqueta(this, it) }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("¿Qué clase vas a grabar?")
+            .setTitle(R.string.que_clase_grabar)
             .setSingleChoiceItems(etiquetas, seleccion) { d, w ->
                 seleccion = w
                 eleccionManual = true
@@ -165,8 +189,8 @@ class MainActivity : Activity() {
                 mostrarCurso()
                 d.dismiss()
             }
-            .setNeutralButton("Editar horario") { _, _ -> abrirHorario() }
-            .setNegativeButton("Cancelar", null)
+            .setNeutralButton(R.string.editar_horario) { _, _ -> abrirHorario() }
+            .setNegativeButton(R.string.cancelar, null)
             .show()
     }
 
@@ -188,7 +212,7 @@ class MainActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             arrancar()
         } else {
-            Toast.makeText(this, "Sin permiso de micrófono no se puede grabar", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, R.string.sin_permiso_microfono, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -196,13 +220,15 @@ class MainActivity : Activity() {
 
     private fun arrancar() {
         val ahora = android.os.SystemClock.elapsedRealtime()
-        if (arrancando() || ahora - ultimoInicio < 2000) return   // doble toque
+        if (RecorderService.estado != Estado.DETENIDO || ahora - ultimoInicio < 2000) return   // doble toque
         ultimoInicio = ahora
         val o = Horario.opciones[seleccion]
         val i = Intent(this, RecorderService::class.java)
             .setAction(RecorderService.ACT_START)
-            .putExtra(RecorderService.EXTRA_NOMBRE, Horario.nombreArchivo(o))
-            .putExtra(RecorderService.EXTRA_TITULO, o.etiqueta)
+            .putExtra(RecorderService.EXTRA_NOMBRE, Horario.nombreArchivo(o.curso, o.tipo))
+            .putExtra(RecorderService.EXTRA_TITULO, Horario.etiqueta(this, o))
+            .putExtra(RecorderService.EXTRA_CURSO_ID, o.curso?.id ?: -1L)
+            .putExtra(RecorderService.EXTRA_TIPO, o.tipo)
         startForegroundService(i)
         eleccionManual = false
         abrirGrabando()
@@ -212,67 +238,55 @@ class MainActivity : Activity() {
         startActivity(Intent(this, GrabandoActivity::class.java))
     }
 
-    private fun arrancando() = RecorderService.estado != Estado.DETENIDO
-
     private fun enviar(accion: String) {
         startService(Intent(this, RecorderService::class.java).setAction(accion))
     }
 
     // ---------------- interfaz ----------------
 
-    private fun refrescar() {
-        val e = RecorderService.estado
+    private fun pintar(inst: RecorderService.Instantanea) {
+        val e = inst.estado
         val activo = e != Estado.DETENIDO
-        tvTiempo.text = Horario.fmt(RecorderService.tiempoMs())
 
-        if (e != ultimoEstado) {
-            ultimoEstado = e
-            when (e) {
-                Estado.GRABANDO -> {
-                    tvEstado.text = "● Grabando"
-                    tvEstado.setTextColor(getColor(R.color.acento))
-                }
-                Estado.PAUSADO -> {
-                    tvEstado.text = "En pausa"
-                    tvEstado.setTextColor(getColor(R.color.marca))
-                }
-                Estado.DETENIDO -> {
-                    tvEstado.text = "Listo para grabar"
-                    tvEstado.setTextColor(getColor(R.color.texto2))
-                }
+        when {
+            e == Estado.GRABANDO && inst.advertencia != null -> {
+                tvEstado.text = getString(R.string.advertencia_con_icono, inst.advertencia)
+                tvEstado.setTextColor(getColor(R.color.marca))
             }
-            btnIniciar.setImageResource(R.drawable.ic_mic)
-            btnIniciar.contentDescription = if (activo) "Ver grabación" else "Grabar"
-            btnPausar.setImageResource(if (e == Estado.PAUSADO) R.drawable.ic_play else R.drawable.ic_pause)
-            tvPausar.text = if (e == Estado.PAUSADO) "Reanudar" else "Pausar"
-            btnPausar.isEnabled = activo
-            btnMarcar.isEnabled = activo
-            grupoPausar.alpha = if (activo) 1f else 0.35f
-            grupoMarcar.alpha = if (activo) 1f else 0.35f
-            cardCurso.alpha = if (activo) 0.6f else 1f
-            tvTiempo.alpha = if (e == Estado.PAUSADO) 0.6f else 1f
-            if (e == Estado.GRABANDO) iniciarPulso() else detenerPulso()
-            if (!activo) mostrarCurso()
+            e == Estado.GRABANDO -> {
+                tvEstado.setText(R.string.estado_grabando)
+                tvEstado.setTextColor(getColor(R.color.acento))
+            }
+            e == Estado.PAUSADO -> {
+                tvEstado.setText(R.string.en_pausa)
+                tvEstado.setTextColor(getColor(R.color.marca))
+            }
+            else -> {
+                tvEstado.setText(R.string.listo_para_grabar)
+                tvEstado.setTextColor(getColor(R.color.texto2))
+            }
         }
 
-        val aviso = RecorderService.advertencia
-        if (e == Estado.GRABANDO) {
-            tvEstado.text = if (aviso != null) "⚠ $aviso" else "● Grabando"
-            tvEstado.setTextColor(getColor(if (aviso != null) R.color.marca else R.color.acento))
-        }
+        btnIniciar.contentDescription = getString(if (activo) R.string.ver_grabacion else R.string.grabar)
+        btnPausar.setImageResource(if (e == Estado.PAUSADO) R.drawable.ic_play else R.drawable.ic_pause)
+        tvPausar.setText(if (e == Estado.PAUSADO) R.string.reanudar else R.string.pausar)
+        btnPausar.isEnabled = activo
+        btnMarcar.isEnabled = activo
+        grupoPausar.alpha = if (activo) 1f else 0.35f
+        grupoMarcar.alpha = if (activo) 1f else 0.35f
+        cardCurso.alpha = if (activo) 0.6f else 1f
+        tvTiempo.alpha = if (e == Estado.PAUSADO) 0.6f else 1f
 
-        val n = RecorderService.numMarcas()
-        tvMarcas.text = when {
-            !activo || n == 0 -> ""
-            n == 1 -> "⚑ 1 marca"
-            else -> "⚑ $n marcas"
-        }
-        tvUltimo.text = RecorderService.ultimoArchivo?.let { "Última: ${it.removeSuffix(".aac")}" } ?: ""
+        tvTiempo.text = Horario.fmt(RecorderService.tiempoMs())
+        handler.removeCallbacks(reloj)
+        if (e == Estado.GRABANDO) handler.postDelayed(reloj, 1000)
 
-        RecorderService.error?.let {
-            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
-            RecorderService.error = null
-        }
+        if (e == Estado.GRABANDO) iniciarPulso() else detenerPulso()
+        if (!activo) mostrarCurso()
+
+        tvMarcas.text = if (!activo || inst.numMarcas == 0) ""
+        else resources.getQuantityString(R.plurals.marcas_con_icono, inst.numMarcas, inst.numMarcas)
+        tvUltimo.text = inst.ultimoArchivo?.let { getString(R.string.ultima_grabacion, it.removeSuffix(".aac")) } ?: ""
     }
 
     private fun iniciarPulso() {
@@ -306,17 +320,13 @@ class MainActivity : Activity() {
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
                 )
             } else {
-                Toast.makeText(
-                    this,
-                    "Activa \"Autoencendido\" y en \"Ahorro de batería\" elige \"Sin restricciones\"",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this, R.string.bateria_instrucciones, Toast.LENGTH_LONG).show()
                 startActivity(
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
                 )
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "No se pudo abrir ajustes: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.error_abrir_ajustes, e.message ?: ""), Toast.LENGTH_LONG).show()
         }
     }
 }

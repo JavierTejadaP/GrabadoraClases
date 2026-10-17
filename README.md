@@ -15,6 +15,18 @@ para volver a ellos después.
 - **Reproductor**: sigue sonando fuera de la app, controles en la notificación y la pantalla
   de bloqueo, velocidades de 0.75x a 2x y recuerda dónde te quedaste.
 - **Mis grabaciones**: ordenadas por curso, para compartir o borrar varias a la vez.
+  Mantén presionado un curso para renombrarlo o cambiarle el color; sus grabaciones lo siguen.
+
+## Cómo está hecha
+
+- Sin librerías de interfaz: vistas de Android y Kotlin, más `kotlinx-coroutines`.
+- `BaseDatos` (SQLite) guarda los cursos, el horario y un índice de las grabaciones con su
+  curso y cuántas marcas tiene. Los audios siguen en Descargas; el índice se pone al día en
+  segundo plano cada vez que se abre una lista.
+- `RecorderService` y `PlayerService` publican su estado en un `StateFlow`; las pantallas lo
+  escuchan mientras están visibles.
+- Todos los textos están en `res/values/strings.xml`, listos para traducir.
+- Tests de la lógica del horario y las marcas en `app/src/test`.
 
 Las grabaciones se guardan en `Descargas/GrabadoraClases`, así puedes copiarlas a la PC o
 compartirlas aunque desinstales la app. Si reinstalas, desde *Mis grabaciones* puedes dar

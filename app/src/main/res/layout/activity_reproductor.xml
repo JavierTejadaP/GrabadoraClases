@@ -108,7 +108,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="−10"
+            android:text="@string/menos_10"
             android:textColor="@color/texto"
             android:textSize="17sp"
             android:textStyle="bold" />
@@ -120,7 +120,7 @@
             android:layout_marginStart="28dp"
             android:layout_marginEnd="28dp"
             android:background="@drawable/bg_btn_grabar"
-            android:contentDescription="Reproducir"
+            android:contentDescription="@string/reproducir"
             android:elevation="6dp"
             android:padding="26dp"
             android:scaleType="fitCenter"
@@ -134,7 +134,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="+10"
+            android:text="@string/mas_10"
             android:textColor="@color/texto"
             android:textSize="17sp"
             android:textStyle="bold" />
@@ -151,7 +151,7 @@
             android:id="@+id/btnCompartir"
             style="@style/Chip"
             android:drawableStart="@drawable/ic_share"
-            android:text="Compartir" />
+            android:text="@string/compartir" />
 
         <TextView
             android:id="@+id/btnMarcar"
@@ -160,7 +160,7 @@
             android:layout_marginEnd="10dp"
             android:drawableStart="@drawable/ic_flag"
             android:drawableTint="@color/marca"
-            android:text="Marcar" />
+            android:text="@string/marcar" />
 
         <TextView
             android:id="@+id/btnVel"

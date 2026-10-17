@@ -26,13 +26,25 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Reproduce en segundo plano (pantalla apagada o fuera de la app).
  * Controles en la notificación y en la pantalla de bloqueo.
  * Recuerda dónde te quedaste en cada grabación.
+ * Las pantallas siguen el estado con [flujo]; la posición se lee con [posicion].
  */
 class PlayerService : Service() {
+
+    data class Instantanea(
+        val uri: Uri? = null,
+        val extras: Bundle? = null,
+        val listo: Boolean = false,
+        val sonando: Boolean = false,
+        val duracion: Long = 0L,
+        val iVel: Int = 0,
+    )
 
     companion object {
         const val ACT_ABRIR = "pe.javier.grabadora.P_ABRIR"
@@ -53,17 +65,16 @@ class PlayerService : Service() {
         private const val CANAL = "reproduccion"
         private const val NOTIF_ID = 2
 
-        @Volatile var uriActual: Uri? = null
-            private set
-        @Volatile var extrasActuales: Bundle? = null
-            private set
-        @Volatile var listo = false
-            private set
-        @Volatile var duracion = 0L
-            private set
-        @Volatile var iVel = 0
-            private set
-        @Volatile var error: String? = null
+        private val _flujo = MutableStateFlow(Instantanea())
+        val flujo: StateFlow<Instantanea> = _flujo
+
+        /** Error para mostrar una vez; la pantalla que lo muestra lo vuelve a poner en null. */
+        val error = MutableStateFlow<String?>(null)
+
+        val uriActual: Uri? get() = _flujo.value.uri
+        val listo: Boolean get() = _flujo.value.listo
+        val duracion: Long get() = _flujo.value.duracion
+        val iVel: Int get() = _flujo.value.iVel
 
         @Volatile private var mpRef: MediaPlayer? = null
 
@@ -113,7 +124,7 @@ class PlayerService : Service() {
         super.onCreate()
         am = getSystemService(AudioManager::class.java)
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CANAL, "Reproducción", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CANAL, getString(R.string.canal_reproduccion), NotificationManager.IMPORTANCE_LOW)
         )
         session = MediaSession(this, "GrabadoraClases").apply {
             setCallback(object : MediaSession.Callback() {
@@ -159,17 +170,22 @@ class PlayerService : Service() {
         focusReq?.let { am.abandonAudioFocusRequest(it) }
         handler.removeCallbacksAndMessages(null)
         session.release()
-        uriActual = null
-        extrasActuales = null
+        _flujo.value = Instantanea(iVel = iVel)
         super.onDestroy()
     }
 
     // ---------------- abrir / cerrar ----------------
 
     private fun abrir(intent: Intent) {
-        val u = intent.getStringExtra(ReproductorActivity.EXTRA_URI)?.let { Uri.parse(it) } ?: return
+        val u = intent.getStringExtra(ReproductorActivity.EXTRA_URI)?.let { Uri.parse(it) }
+        if (u == null) {
+            // startForegroundService exige llamar a startForeground aunque no haya nada que abrir
+            startForeground(NOTIF_ID, construirNotif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            cerrar()
+            return
+        }
         val mismo = u == uriActual && mp != null
-        if (!mismo) extrasActuales = Bundle(intent.extras ?: Bundle())
+        if (!mismo) _flujo.value = _flujo.value.copy(extras = Bundle(intent.extras ?: Bundle()))
 
         startForeground(NOTIF_ID, construirNotif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         if (mismo) {
@@ -179,8 +195,7 @@ class PlayerService : Service() {
 
         guardarPosicion()
         liberarPlayer()
-        uriActual = u
-        duracion = 0L
+        _flujo.value = _flujo.value.copy(uri = u, duracion = 0L)
         val bytes = intent.getLongExtra(ReproductorActivity.EXTRA_BYTES, 0L)
 
         try {
@@ -189,10 +204,10 @@ class PlayerService : Service() {
             p.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK)
             p.setDataSource(this, u)
             p.setOnPreparedListener {
-                listo = true
-                duracion = if (it.duration > 0) it.duration.toLong() else bytes * 8 * 1000 / 48000
+                val dur = if (it.duration > 0) it.duration.toLong() else bytes * 8 * 1000 / 48000
+                _flujo.value = _flujo.value.copy(listo = true, duracion = dur)
                 val guardada = prefs.getLong(u.toString(), 0L)
-                if (guardada in 5_000L..(duracion - 5_000L)) it.seekTo(guardada, MediaPlayer.SEEK_CLOSEST_SYNC)
+                if (guardada in 5_000L..(dur - 5_000L)) it.seekTo(guardada, MediaPlayer.SEEK_CLOSEST_SYNC)
                 actualizarMetadata()
                 reproducir()
             }
@@ -202,14 +217,15 @@ class PlayerService : Service() {
                 actualizar()
             }
             p.setOnErrorListener { _, what, extra ->
-                error = "Error al reproducir ($what/$extra)"
+                error.value = getString(R.string.error_reproducir, what, extra)
+                actualizar()
                 true
             }
             p.prepareAsync()
             mp = p
             mpRef = p
         } catch (e: Exception) {
-            error = "No se pudo abrir el audio: ${e.message}"
+            error.value = getString(R.string.error_abrir_audio, e.message ?: "")
             cerrar()
             return
         }
@@ -220,8 +236,7 @@ class PlayerService : Service() {
     private fun cerrar() {
         guardarPosicion()
         liberarPlayer()
-        uriActual = null
-        extrasActuales = null
+        _flujo.value = Instantanea(iVel = iVel)
         desregistrarRuidoso()
         focusReq?.let { am.abandonAudioFocusRequest(it) }
         session.isActive = false
@@ -230,7 +245,7 @@ class PlayerService : Service() {
     }
 
     private fun liberarPlayer() {
-        listo = false
+        _flujo.value = _flujo.value.copy(listo = false, sonando = false)
         runCatching { mp?.release() }
         mp = null
         mpRef = null
@@ -267,7 +282,7 @@ class PlayerService : Service() {
     private fun saltar(delta: Long) = buscar(posicion() + delta)
 
     private fun cambiarVelocidad(i: Int) {
-        iVel = i.coerceIn(0, VELOCIDADES.size - 1)
+        _flujo.value = _flujo.value.copy(iVel = i.coerceIn(0, VELOCIDADES.size - 1))
         // Cambiarla en pausa haría que empiece a sonar; se aplica al reanudar
         if (reproduciendo()) aplicarVelocidad()
         actualizar()
@@ -333,18 +348,23 @@ class PlayerService : Service() {
     // ---------------- sesión / notificación ----------------
 
     private fun actualizarMetadata() {
-        val ex = extrasActuales
+        val ex = _flujo.value.extras
         session.setMetadata(
             MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, ex?.getString(ReproductorActivity.EXTRA_TITULO) ?: "Grabación")
+                .putString(
+                    MediaMetadata.METADATA_KEY_TITLE,
+                    ex?.getString(ReproductorActivity.EXTRA_TITULO) ?: getString(R.string.grabacion)
+                )
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, ex?.getString(ReproductorActivity.EXTRA_SUBTITULO) ?: "")
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, duracion)
                 .build()
         )
     }
 
+    /** Publica el estado y refresca la sesión multimedia y la notificación. */
     private fun actualizar() {
         val play = reproduciendo()
+        _flujo.value = _flujo.value.copy(sonando = play)
         val estado = when {
             play -> PlaybackState.STATE_PLAYING
             listo -> PlaybackState.STATE_PAUSED
@@ -358,8 +378,12 @@ class PlayerService : Service() {
                         PlaybackState.ACTION_REWIND or PlaybackState.ACTION_STOP
                 )
                 .setState(estado, posicion(), if (play) VELOCIDADES[iVel] else 0f, SystemClock.elapsedRealtime())
-                .addCustomAction(PlaybackState.CustomAction.Builder("rew", "−10 s", android.R.drawable.ic_media_rew).build())
-                .addCustomAction(PlaybackState.CustomAction.Builder("ff", "+10 s", android.R.drawable.ic_media_ff).build())
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder("rew", getString(R.string.atrasar_10), android.R.drawable.ic_media_rew).build()
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder("ff", getString(R.string.adelantar_10), android.R.drawable.ic_media_ff).build()
+                )
                 .build()
         )
         if (uriActual != null) {
@@ -375,7 +399,7 @@ class PlayerService : Service() {
         )
 
     private fun construirNotif(): Notification {
-        val ex = extrasActuales ?: Bundle()
+        val ex = _flujo.value.extras ?: Bundle()
         val abrirPi = PendingIntent.getActivity(
             this, 0,
             Intent(this, ReproductorActivity::class.java).putExtras(ex).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -387,22 +411,22 @@ class PlayerService : Service() {
 
         return Notification.Builder(this, CANAL)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle(ex.getString(ReproductorActivity.EXTRA_TITULO) ?: "Reproduciendo")
+            .setContentTitle(ex.getString(ReproductorActivity.EXTRA_TITULO) ?: getString(R.string.reproduciendo))
             .setContentText(ex.getString(ReproductorActivity.EXTRA_SUBTITULO) ?: "")
             .setContentIntent(abrirPi)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(accion(android.R.drawable.ic_media_rew, "−10 s", pi(ACT_SALTAR, 11, -SALTO)))
+            .addAction(accion(android.R.drawable.ic_media_rew, getString(R.string.atrasar_10), pi(ACT_SALTAR, 11, -SALTO)))
             .addAction(
                 accion(
                     if (play) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                    if (play) "Pausar" else "Reproducir",
+                    getString(if (play) R.string.pausar else R.string.reproducir),
                     pi(ACT_TOGGLE, 12)
                 )
             )
-            .addAction(accion(android.R.drawable.ic_media_ff, "+10 s", pi(ACT_SALTAR, 13, SALTO)))
-            .addAction(accion(android.R.drawable.ic_menu_close_clear_cancel, "Cerrar", pi(ACT_CERRAR, 14)))
+            .addAction(accion(android.R.drawable.ic_media_ff, getString(R.string.adelantar_10), pi(ACT_SALTAR, 13, SALTO)))
+            .addAction(accion(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.cerrar), pi(ACT_CERRAR, 14)))
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.sessionToken)

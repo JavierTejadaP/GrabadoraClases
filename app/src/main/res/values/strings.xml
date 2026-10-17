@@ -1,4 +1,181 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Grabadora Clases</string>
+    <string name="titulo_app">Grabadora de clases</string>
+
+    <!-- Comunes -->
+    <string name="cancelar">Cancelar</string>
+    <string name="guardar">Guardar</string>
+    <string name="borrar">Borrar</string>
+    <string name="borrado">Borrado</string>
+    <string name="cerrar">Cerrar</string>
+    <string name="compartir">Compartir</string>
+    <string name="agregar">Agregar</string>
+    <string name="cambiar">Cambiar</string>
+    <string name="volver">Volver</string>
+    <string name="color">Color</string>
+    <string name="todas">Todas</string>
+
+    <!-- Tipos de clase -->
+    <string name="tipo_teoria">Teoría</string>
+    <string name="tipo_practica">Práctica</string>
+    <string name="tipo_laboratorio">Laboratorio</string>
+    <string name="curso_y_tipo">%1$s - %2$s</string>
+
+    <!-- Pantalla principal -->
+    <string name="grabacion">Grabación</string>
+    <string name="grabacion_libre">Grabación libre</string>
+    <string name="grabaciones_libres">Grabaciones libres</string>
+    <string name="se_guarda_fecha_hora">Se guarda con fecha y hora</string>
+    <string name="etiqueta_sin_curso">SIN CURSO</string>
+    <string name="etiqueta_ahora_en_clase">AHORA EN CLASE</string>
+    <string name="etiqueta_curso_elegido">CURSO ELEGIDO</string>
+    <string name="que_clase_grabar">¿Qué clase vas a grabar?</string>
+    <string name="editar_horario">Editar horario</string>
+    <string name="no_cambiar_curso_grabando">No se puede cambiar el curso mientras grabas</string>
+    <string name="sin_permiso_microfono">Sin permiso de micrófono no se puede grabar</string>
+    <string name="listo_para_grabar">Listo para grabar</string>
+    <string name="estado_grabando">● Grabando</string>
+    <string name="en_pausa">En pausa</string>
+    <string name="advertencia_con_icono">⚠ %1$s</string>
+    <string name="grabar">Grabar</string>
+    <string name="ver_grabacion">Ver grabación</string>
+    <string name="pausar">Pausar</string>
+    <string name="reanudar">Reanudar</string>
+    <string name="marcar">Marcar</string>
+    <string name="detener">Detener</string>
+    <string name="mis_grabaciones">Mis grabaciones</string>
+    <string name="mi_horario">Mi horario</string>
+    <string name="configurar_bateria">Configurar batería</string>
+    <string name="sin_grabaciones">Aún no tienes grabaciones</string>
+    <string name="ultima_grabacion">Última: %1$s</string>
+    <string name="bateria_instrucciones">Activa \"Autoencendido\" y en \"Ahorro de batería\" elige \"Sin restricciones\"</string>
+    <string name="error_abrir_ajustes">No se pudo abrir ajustes: %1$s</string>
+    <plurals name="grabaciones_guardadas">
+        <item quantity="one">%d grabación guardada</item>
+        <item quantity="other">%d grabaciones guardadas</item>
+    </plurals>
+    <plurals name="marcas_con_icono">
+        <item quantity="one">⚑ %d marca</item>
+        <item quantity="other">⚑ %d marcas</item>
+    </plurals>
+
+    <!-- Grabando -->
+    <string name="terminar_titulo">¿Terminar la grabación?</string>
+    <string name="terminar_mensaje">Se guardará lo grabado (%1$s).</string>
+    <string name="terminar">Terminar</string>
+    <string name="terminar_y_guardar">Terminar y guardar</string>
+    <string name="seguir_grabando">Seguir grabando</string>
+    <string name="guardado">Guardado: %1$s</string>
+    <string name="marca_n">Marca %1$d - %2$s</string>
+
+    <!-- Servicio de grabación -->
+    <string name="canal_grabacion">Grabación</string>
+    <string name="canal_alertas">Alertas de grabación</string>
+    <string name="notif_grabando">● Grabando</string>
+    <string name="notif_pausado">❚❚ Pausado</string>
+    <string name="aviso_con_titulo">⚠ %1$s · %2$s</string>
+    <string name="titulo_con_tiempo">%1$s · %2$s</string>
+    <string name="advertencia_sin_sonido">No se capta sonido</string>
+    <string name="aviso_sin_sonido_titulo">No se está captando sonido</string>
+    <string name="aviso_sin_sonido_texto">Otra app (una llamada, WhatsApp, otra grabadora) puede estar usando el micrófono. La grabación sigue, pero ese tramo queda en silencio.</string>
+    <string name="aviso_detenida_titulo">La grabación se detuvo</string>
+    <string name="aviso_detenida_sistema">El sistema cerró la grabadora. Lo grabado hasta ahora está guardado.</string>
+    <string name="aviso_detenida_espacio">El celular se quedó sin espacio. Lo grabado hasta ahora está guardado.</string>
+    <string name="aviso_detenida_microfono">Hubo un error del micrófono. Lo grabado hasta ahora está guardado.</string>
+    <string name="aviso_poco_espacio_titulo">Poco espacio en el celular</string>
+    <string name="aviso_poco_espacio_texto">Quedan %1$d MB. Alcanza para aprox. %2$d h más de grabación.</string>
+    <string name="error_sin_espacio">No hay espacio en el celular. Libera espacio e intenta de nuevo.</string>
+    <string name="error_sin_espacio_detenida">Se detuvo por falta de espacio. Lo grabado está guardado.</string>
+    <string name="error_crear_archivo">No se pudo crear el archivo</string>
+    <string name="error_abrir_archivo">No se pudo abrir el archivo</string>
+    <string name="error_grabador">Error del grabador (%1$d/%2$d). Se guardó lo grabado.</string>
+    <string name="error_no_inicio">No se pudo iniciar: %1$s</string>
+    <string name="error_pausar">No se pudo pausar: %1$s</string>
+    <string name="error_reanudar">No se pudo reanudar: %1$s</string>
+    <string name="error_guardar_marcas">No se pudieron guardar las marcas: %1$s</string>
+
+    <!-- Mis grabaciones -->
+    <string name="sin_grabaciones_curso">Sin grabaciones</string>
+    <string name="cantidad_y_ultima">%1$s · última %2$s</string>
+    <string name="recuperar_grabaciones">¿Faltan grabaciones de antes de reinstalar la app?\nToca aquí y elige la carpeta GrabadoraClases</string>
+    <string name="error_selector_carpetas">No se pudo abrir el selector de carpetas</string>
+    <string name="error_guardar_acceso">No se pudo guardar el acceso: %1$s</string>
+    <string name="no_se_encontraron">No se encontraron grabaciones anteriores en esa carpeta</string>
+    <string name="aun_no_hay_grabaciones_aqui">Aún no hay grabaciones aquí</string>
+    <string name="tipo_y_dia">%1$s · %2$s</string>
+    <string name="detalle_grabacion">%1$s · %2$s · %3$s</string>
+    <string name="fecha_y_hora">%1$s · %2$s</string>
+    <string name="borrar_mensaje">También se borran sus marcas. No se puede deshacer.</string>
+    <string name="error_borrar">No se pudo borrar: %1$s</string>
+    <string name="duracion_menos_minuto">&lt;1 min</string>
+    <string name="duracion_minutos">~%1$d min</string>
+    <string name="duracion_horas">~%1$d h %2$d min</string>
+    <plurals name="n_grabaciones">
+        <item quantity="one">%d grabación</item>
+        <item quantity="other">%d grabaciones</item>
+    </plurals>
+    <plurals name="recuperadas">
+        <item quantity="one">Se recuperó %d grabación</item>
+        <item quantity="other">Se recuperaron %d grabaciones</item>
+    </plurals>
+    <plurals name="seleccionadas">
+        <item quantity="one">%d seleccionada</item>
+        <item quantity="other">%d seleccionadas</item>
+    </plurals>
+    <plurals name="borrar_grabaciones">
+        <item quantity="one">¿Borrar esta grabación?</item>
+        <item quantity="other">¿Borrar %d grabaciones?</item>
+    </plurals>
+
+    <!-- Reproductor -->
+    <string name="reproducir">Reproducir</string>
+    <string name="reproduciendo">Reproduciendo</string>
+    <string name="canal_reproduccion">Reproducción</string>
+    <string name="atrasar_10">−10 s</string>
+    <string name="adelantar_10">+10 s</string>
+    <string name="menos_10">−10</string>
+    <string name="mas_10">+10</string>
+    <string name="duracion_total">/ %1$s</string>
+    <string name="marca_numero">Marca %1$d</string>
+    <string name="marca_agregada">Marca agregada · %1$s</string>
+    <string name="borrar_marca_titulo">¿Borrar marca %1$d?</string>
+    <string name="sin_marcas_ayuda">Sin marcas · toca Marcar para agregar una</string>
+    <string name="abrir_con_otra_app">Abrir con otra app</string>
+    <string name="borrar_grabacion">Borrar grabación</string>
+    <string name="sin_otra_app_audio">No hay otra app para reproducir audio</string>
+    <string name="error_reproducir">Error al reproducir (%1$d/%2$d)</string>
+    <string name="error_abrir_audio">No se pudo abrir el audio: %1$s</string>
+    <plurals name="marcas_ayuda">
+        <item quantity="one">%d marca · toca para saltar, mantén para borrar</item>
+        <item quantity="other">%d marcas · toca para saltar, mantén para borrar</item>
+    </plurals>
+
+    <!-- Mi horario -->
+    <string name="horario_vacio">Aún no tienes clases.\nAgrega cada curso con su día y hora: así la app elige sola qué clase grabar.</string>
+    <string name="horario_ayuda">Toca una clase para editarla o borrarla.</string>
+    <string name="agregar_clase_boton">+  Agregar clase</string>
+    <string name="agregar_clase">Agregar clase</string>
+    <string name="editar_clase">Editar clase</string>
+    <string name="tipo_y_horas">%1$s · %2$s – %3$s</string>
+    <string name="campo_curso">CURSO</string>
+    <string name="campo_tipo">TIPO</string>
+    <string name="campo_dia">DÍA</string>
+    <string name="campo_hora">HORA</string>
+    <string name="curso_ejemplo">Ej. Cálculo I</string>
+    <string name="hora_inicio">Inicio  %1$s</string>
+    <string name="hora_fin">Fin  %1$s</string>
+    <string name="error_fin_antes_inicio">La hora de fin debe ser después del inicio</string>
+    <string name="error_cruce">Se cruza con %1$s (%2$s, %3$s – %4$s)</string>
+    <string name="borrar_clase_titulo">¿Borrar esta clase?</string>
+    <string name="borrar_clase_mensaje">%1$s\n%2$s %3$s – %4$s\n\nLas grabaciones de este curso no se borran.</string>
+    <string name="error_nombre_vacio">Escribe el nombre del curso</string>
+    <string name="error_nombre_guion">El nombre no puede tener \" - \"</string>
+    <string name="error_nombre_caracteres">El nombre no puede tener / \\ : * ? \" &lt; &gt; |</string>
+    <string name="error_nombre_reservado">Ese nombre está reservado</string>
+    <string name="error_nombre_repetido">Ya hay otro curso con ese nombre</string>
+
+    <!-- Cursos -->
+    <string name="editar_curso">Editar curso</string>
+    <string name="sin_cursos">Aún no tienes cursos. Agrega una clase primero.</string>
 </resources>

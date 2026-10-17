@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.text.format.DateFormat
 import android.view.ActionMode
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -21,6 +22,12 @@ import android.widget.FrameLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -33,28 +40,31 @@ import java.util.Locale
 class GrabacionesActivity : Activity() {
 
     companion object {
-        const val EXTRA_CURSO = "curso"
+        /** Id del curso; -1 = grabaciones libres. */
+        const val EXTRA_CURSO_ID = "curso_id"
         private const val REQ_BORRAR = 10
         private const val M_COMPARTIR = 1
         private const val M_BORRAR = 2
         private const val M_TODO = 3
     }
 
-    private val es = Locale.forLanguageTag("es-PE")
-    private val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM yyyy", es)
-    private val fmtHora = SimpleDateFormat("h:mm a", es)
-    private val fmtDia = SimpleDateFormat("d", es)
-    private val fmtMes = SimpleDateFormat("MMM", es)
-    private val fmtSemana = SimpleDateFormat("EEEE", es)
+    private val loc = Locale.getDefault()
+    private val fmtFecha = SimpleDateFormat(DateFormat.getBestDateTimePattern(loc, "EEEEdMMMMyyyy"), loc)
+    private val fmtDia = SimpleDateFormat("d", loc)
+    private val fmtMes = SimpleDateFormat("MMM", loc)
+    private val fmtSemana = SimpleDateFormat("EEEE", loc)
+    private lateinit var fmtHora: java.text.DateFormat
 
-    private var curso: String? = null
+    private var cursoId: Long? = null
     private lateinit var lista: ListView
     private var items: List<Grabacion> = emptyList()
+    private var scope: CoroutineScope? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        curso = intent.getStringExtra(EXTRA_CURSO)
-        title = curso ?: "Grabaciones libres"
+        fmtHora = DateFormat.getTimeFormat(this)
+        cursoId = intent.getLongExtra(EXTRA_CURSO_ID, -1L).takeIf { it >= 0 }
+        title = Horario.curso(cursoId)?.nombre ?: getString(R.string.grabaciones_libres)
         actionBar?.setDisplayHomeAsUpEnabled(true)
 
         val root = FrameLayout(this)
@@ -66,7 +76,7 @@ class GrabacionesActivity : Activity() {
             setPadding(0, 8, 0, 24)
         }
         val vacio = TextView(this).apply {
-            text = "Aún no hay grabaciones aquí"
+            setText(R.string.aun_no_hay_grabaciones_aqui)
             gravity = Gravity.CENTER
             textSize = 16f
             setPadding(48, 48, 48, 48)
@@ -77,14 +87,14 @@ class GrabacionesActivity : Activity() {
         lista.emptyView = vacio
         setContentView(root)
 
-        lista.setOnItemClickListener { _, _, pos, _ -> abrir(items[pos]) }
+        lista.setOnItemClickListener { _, _, pos, _ -> items.getOrNull(pos)?.let { abrir(it) } }
 
         lista.choiceMode = ListView.CHOICE_MODE_MULTIPLE_MODAL
         lista.setMultiChoiceModeListener(object : AbsListView.MultiChoiceModeListener {
             override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                menu?.add(0, M_COMPARTIR, 0, "Compartir")?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                menu?.add(0, M_BORRAR, 1, "Borrar")?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                menu?.add(0, M_TODO, 2, "Todas")?.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                menu?.add(0, M_COMPARTIR, 0, R.string.compartir)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                menu?.add(0, M_BORRAR, 1, R.string.borrar)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                menu?.add(0, M_TODO, 2, R.string.todas)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
                 return true
             }
 
@@ -107,19 +117,34 @@ class GrabacionesActivity : Activity() {
 
             override fun onItemCheckedStateChanged(mode: ActionMode?, position: Int, id: Long, checked: Boolean) {
                 val n = lista.checkedItemCount
-                mode?.title = if (n == 1) "1 seleccionada" else "$n seleccionadas"
+                mode?.title = resources.getQuantityString(R.plurals.seleccionadas, n, n)
             }
         })
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onStart() {
+        super.onStart()
+        scope = MainScope()
         cargar()
     }
 
+    override fun onStop() {
+        scope?.cancel()
+        scope = null
+        super.onStop()
+    }
+
     private fun cargar() {
-        items = Biblioteca.cargar(this).filter { it.curso == curso }
-        val color = ColorStateList.valueOf(Horario.color(curso))
+        val s = scope ?: return
+        s.launch {
+            val todas = withContext(Dispatchers.IO) { Biblioteca.cargar(applicationContext) }
+            mostrar(todas.filter { it.curso?.id == cursoId })
+        }
+    }
+
+    private fun mostrar(nuevas: List<Grabacion>) {
+        items = nuevas
+        val color = ColorStateList.valueOf(Horario.color(Horario.curso(cursoId)))
         lista.adapter = object : BaseAdapter() {
             override fun getCount() = items.size
             override fun getItem(position: Int) = items[position]
@@ -130,12 +155,16 @@ class GrabacionesActivity : Activity() {
                 val fecha = Date(g.fechaMs)
                 v.findViewById<View>(R.id.bloqueFecha).backgroundTintList = color
                 v.findViewById<TextView>(R.id.tvDia).text = fmtDia.format(fecha)
-                v.findViewById<TextView>(R.id.tvMes).text = fmtMes.format(fecha).uppercase(es).removeSuffix(".")
+                v.findViewById<TextView>(R.id.tvMes).text = fmtMes.format(fecha).uppercase(loc).removeSuffix(".")
                 v.findViewById<TextView>(R.id.tvTitulo).text =
-                    if (g.curso == null) fmtFecha.format(fecha).replaceFirstChar { it.titlecase(es) }
-                    else "${g.tipo} · ${fmtSemana.format(fecha).replaceFirstChar { it.titlecase(es) }}"
-                v.findViewById<TextView>(R.id.tvDetalle).text =
-                    "${fmtHora.format(fecha)} · ${Biblioteca.fmtDuracion(g.duracionAproxMs)} · ${Biblioteca.fmtTamano(g.bytes)}"
+                    if (g.curso == null) mayuscula(fmtFecha.format(fecha))
+                    else getString(R.string.tipo_y_dia, Horario.etiquetaTipo(this@GrabacionesActivity, g.tipo), mayuscula(fmtSemana.format(fecha)))
+                v.findViewById<TextView>(R.id.tvDetalle).text = getString(
+                    R.string.detalle_grabacion,
+                    fmtHora.format(fecha),
+                    Biblioteca.fmtDuracion(this@GrabacionesActivity, g.duracionAproxMs),
+                    Biblioteca.fmtTamano(g.bytes)
+                )
                 val tvM = v.findViewById<TextView>(R.id.tvMarcas)
                 tvM.visibility = if (g.numMarcas > 0) View.VISIBLE else View.GONE
                 tvM.text = g.numMarcas.toString()
@@ -143,6 +172,8 @@ class GrabacionesActivity : Activity() {
             }
         }
     }
+
+    private fun mayuscula(s: String) = s.replaceFirstChar { it.titlecase(loc) }
 
     private fun seleccionados(): List<Grabacion> {
         val c = lista.checkedItemPositions ?: return emptyList()
@@ -153,15 +184,16 @@ class GrabacionesActivity : Activity() {
     // ---------------- acciones ----------------
 
     private fun abrir(g: Grabacion) {
-        val fecha = fmtFecha.format(Date(g.fechaMs)).replaceFirstChar { it.titlecase(es) }
+        val fecha = Date(g.fechaMs)
         startActivity(
             Intent(this, ReproductorActivity::class.java)
                 .putExtra(ReproductorActivity.EXTRA_URI, g.uri.toString())
                 .putExtra(ReproductorActivity.EXTRA_NOMBRE, g.nombre)
-                .putExtra(ReproductorActivity.EXTRA_TITULO, g.curso?.let { "$it - ${g.tipo}" } ?: "Grabación libre")
-                .putExtra(ReproductorActivity.EXTRA_SUBTITULO, "$fecha · ${fmtHora.format(Date(g.fechaMs))}")
+                .putExtra(ReproductorActivity.EXTRA_TITULO, Horario.etiqueta(this, g.curso, g.tipo))
+                .putExtra(ReproductorActivity.EXTRA_SUBTITULO, getString(R.string.fecha_y_hora, mayuscula(fmtFecha.format(fecha)), fmtHora.format(fecha)))
                 .putExtra(ReproductorActivity.EXTRA_MARCAS, g.marcasUri?.toString())
                 .putExtra(ReproductorActivity.EXTRA_BYTES, g.bytes)
+                .putExtra(ReproductorActivity.EXTRA_CURSO_ID, g.curso?.id ?: -1L)
         )
     }
 
@@ -175,32 +207,30 @@ class GrabacionesActivity : Activity() {
         }
         i.type = "audio/*"
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, "Compartir"))
+        startActivity(Intent.createChooser(i, getString(R.string.compartir)))
     }
 
     private fun confirmarBorrar(sel: List<Grabacion>, alTerminar: () -> Unit) {
         if (sel.isEmpty()) return
-        val titulo = if (sel.size == 1) "¿Borrar esta grabación?" else "¿Borrar ${sel.size} grabaciones?"
         AlertDialog.Builder(this)
-            .setTitle(titulo)
-            .setMessage("También se borran sus marcas. No se puede deshacer.")
-            .setPositiveButton("Borrar") { _, _ ->
+            .setTitle(resources.getQuantityString(R.plurals.borrar_grabaciones, sel.size, sel.size))
+            .setMessage(R.string.borrar_mensaje)
+            .setPositiveButton(R.string.borrar) { _, _ ->
                 val fallidos = Biblioteca.borrar(this, sel)
                 if (fallidos.isNotEmpty() && Build.VERSION.SDK_INT >= 30) {
                     try {
                         val pi = MediaStore.createDeleteRequest(contentResolver, fallidos)
-                        @Suppress("DEPRECATION")
                         startIntentSenderForResult(pi.intentSender, REQ_BORRAR, null, 0, 0, 0)
                     } catch (e: Exception) {
-                        Toast.makeText(this, "No se pudo borrar: ${e.message}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, getString(R.string.error_borrar, e.message ?: ""), Toast.LENGTH_LONG).show()
                     }
                 } else {
-                    Toast.makeText(this, "Borrado", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.borrado, Toast.LENGTH_SHORT).show()
                 }
                 cargar()
                 alTerminar()
             }
-            .setNegativeButton("Cancelar", null)
+            .setNegativeButton(R.string.cancelar, null)
             .show()
     }
 

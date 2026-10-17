@@ -38,13 +38,13 @@
         <activity
             android:name=".CursosActivity"
             android:exported="false"
-            android:label="Mis grabaciones"
+            android:label="@string/mis_grabaciones"
             android:parentActivityName=".MainActivity" />
 
         <activity
             android:name=".HorarioActivity"
             android:exported="false"
-            android:label="Mi horario"
+            android:label="@string/mi_horario"
             android:parentActivityName=".MainActivity"
             android:screenOrientation="portrait" />
 

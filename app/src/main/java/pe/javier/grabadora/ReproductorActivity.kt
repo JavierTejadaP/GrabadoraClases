@@ -21,6 +21,10 @@ import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Pantalla del reproductor. El audio lo reproduce PlayerService, así que
@@ -35,6 +39,7 @@ class ReproductorActivity : Activity() {
         const val EXTRA_SUBTITULO = "subtitulo"
         const val EXTRA_MARCAS = "marcas"
         const val EXTRA_BYTES = "bytes"
+        const val EXTRA_CURSO_ID = "curso_id"
         private const val REQ_BORRAR = 20
         private const val M_ABRIR = 1
         private const val M_BORRAR = 2
@@ -45,7 +50,6 @@ class ReproductorActivity : Activity() {
     private var titulo = ""
     private var marcasUri: Uri? = null
     private val marcas = mutableListOf<Long>()
-    private var mostrandoPausa = false
 
     private lateinit var tvActual: TextView
     private lateinit var tvTotal: TextView
@@ -56,9 +60,12 @@ class ReproductorActivity : Activity() {
     private lateinit var btnVel: TextView
 
     private val handler = Handler(Looper.getMainLooper())
-    private val tick = object : Runnable {
+    private var scope: CoroutineScope? = null
+
+    /** Solo mientras suena: avanza la barra y el tiempo. */
+    private val progreso = object : Runnable {
         override fun run() {
-            refrescar()
+            pintarPosicion()
             handler.postDelayed(this, 200)
         }
     }
@@ -78,11 +85,11 @@ class ReproductorActivity : Activity() {
         actionBar?.setDisplayHomeAsUpEnabled(true)
         setContentView(R.layout.activity_reproductor)
 
-        val curso = if (titulo.contains(" - ")) titulo.substringBefore(" - ") else null
+        val curso = Horario.curso(intent.getLongExtra(EXTRA_CURSO_ID, -1L))
         findViewById<TextView>(R.id.tvTitulo).text = titulo
         findViewById<TextView>(R.id.tvSubtitulo).text = intent.getStringExtra(EXTRA_SUBTITULO)
         findViewById<TextView>(R.id.tvIniciales).apply {
-            text = Horario.iniciales(curso)
+            text = Horario.iniciales(curso?.nombre)
             backgroundTintList = ColorStateList.valueOf(Horario.color(curso))
         }
 
@@ -132,14 +139,26 @@ class ReproductorActivity : Activity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        handler.post(tick)
+    override fun onStart() {
+        super.onStart()
+        val s = MainScope()
+        scope = s
+        s.launch { PlayerService.flujo.collect { pintar(it) } }
+        s.launch {
+            PlayerService.error.collect { e ->
+                if (e != null) {
+                    Toast.makeText(this@ReproductorActivity, e, Toast.LENGTH_LONG).show()
+                    PlayerService.error.value = null
+                }
+            }
+        }
     }
 
-    override fun onPause() {
-        super.onPause()
-        handler.removeCallbacks(tick)   // el audio sigue sonando
+    override fun onStop() {
+        scope?.cancel()
+        scope = null
+        handler.removeCallbacks(progreso)   // el audio sigue sonando
+        super.onStop()
     }
 
     // ---------------- servicio ----------------
@@ -156,29 +175,26 @@ class ReproductorActivity : Activity() {
         startService(Intent(this, PlayerService::class.java).setAction(accion).apply(extras))
     }
 
-    private fun refrescar() {
-        val activo = esta()
-        val listo = activo && PlayerService.listo
-        val sonando = activo && PlayerService.reproduciendo()
-        if (sonando != mostrandoPausa) {
-            mostrandoPausa = sonando
-            btnPlay.setImageResource(if (sonando) R.drawable.ic_pause else R.drawable.ic_play)
+    private fun pintar(inst: PlayerService.Instantanea) {
+        val activo = inst.uri == uri
+        val sonando = activo && inst.sonando
+        btnPlay.setImageResource(if (sonando) R.drawable.ic_pause else R.drawable.ic_play)
+        btnPlay.contentDescription = getString(if (sonando) R.string.pausar else R.string.reproducir)
+        btnVel.text = PlayerService.etiquetaVel(inst.iVel)
+        if (activo && inst.listo && linea.duracion != inst.duracion) {
+            linea.duracion = inst.duracion
+            tvTotal.text = getString(R.string.duracion_total, Horario.fmt(inst.duracion))
         }
-        btnVel.text = PlayerService.etiquetaVel(PlayerService.iVel)
-        if (listo) {
-            val dur = PlayerService.duracion
-            if (linea.duracion != dur) {
-                linea.duracion = dur
-                tvTotal.text = "/ ${Horario.fmt(dur)}"
-            }
-            val t = if (linea.arrastrando) linea.posicion else PlayerService.posicion()
-            if (!linea.arrastrando) linea.posicion = t
-            tvActual.text = Horario.fmt(t)
-        }
-        PlayerService.error?.let {
-            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
-            PlayerService.error = null
-        }
+        pintarPosicion()
+        handler.removeCallbacks(progreso)
+        if (sonando) handler.postDelayed(progreso, 200)
+    }
+
+    private fun pintarPosicion() {
+        if (!esta() || !PlayerService.listo) return
+        val t = if (linea.arrastrando) linea.posicion else PlayerService.posicion()
+        if (!linea.arrastrando) linea.posicion = t
+        tvActual.text = Horario.fmt(t)
     }
 
     private fun buscar(ms: Long) {
@@ -205,16 +221,13 @@ class ReproductorActivity : Activity() {
             override fun getItemId(position: Int) = position.toLong()
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val v = convertView ?: LayoutInflater.from(parent.context).inflate(R.layout.item_marca, parent, false)
-                v.findViewById<TextView>(R.id.tvNombre).text = "Marca ${position + 1}"
+                v.findViewById<TextView>(R.id.tvNombre).text = getString(R.string.marca_numero, position + 1)
                 v.findViewById<TextView>(R.id.tvTiempo).text = Horario.fmt(marcas[position])
                 return v
             }
         }
-        tvMarcasTitulo.text = if (marcas.isEmpty()) {
-            "Sin marcas · toca Marcar para agregar una"
-        } else {
-            "Marcas (${marcas.size}) · toca para saltar, mantén para borrar"
-        }
+        tvMarcasTitulo.text = if (marcas.isEmpty()) getString(R.string.sin_marcas_ayuda)
+        else resources.getQuantityString(R.plurals.marcas_ayuda, marcas.size, marcas.size)
     }
 
     private fun guardarMarcas() {
@@ -228,18 +241,18 @@ class ReproductorActivity : Activity() {
         marcas.add(t)
         marcas.sort()
         guardarMarcas()
-        Toast.makeText(this, "Marca agregada · ${Horario.fmt(t)}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.marca_agregada, Horario.fmt(t)), Toast.LENGTH_SHORT).show()
     }
 
     private fun borrarMarca(pos: Int) {
         AlertDialog.Builder(this)
-            .setTitle("¿Borrar marca ${pos + 1}?")
+            .setTitle(getString(R.string.borrar_marca_titulo, pos + 1))
             .setMessage(Horario.fmt(marcas[pos]))
-            .setPositiveButton("Borrar") { _, _ ->
+            .setPositiveButton(R.string.borrar) { _, _ ->
                 marcas.removeAt(pos)
                 guardarMarcas()
             }
-            .setNegativeButton("Cancelar", null)
+            .setNegativeButton(R.string.cancelar, null)
             .show()
     }
 
@@ -250,12 +263,12 @@ class ReproductorActivity : Activity() {
             .putExtra(Intent.EXTRA_STREAM, uri)
             .setType("audio/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, "Compartir"))
+        startActivity(Intent.createChooser(i, getString(R.string.compartir)))
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(0, M_ABRIR, 0, "Abrir con otra app")
-        menu.add(0, M_BORRAR, 1, "Borrar grabación")
+        menu.add(0, M_ABRIR, 0, R.string.abrir_con_otra_app)
+        menu.add(0, M_BORRAR, 1, R.string.borrar_grabacion)
         return true
     }
 
@@ -278,15 +291,15 @@ class ReproductorActivity : Activity() {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             )
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(this, "No hay otra app para reproducir audio", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, R.string.sin_otra_app_audio, Toast.LENGTH_LONG).show()
         }
     }
 
     private fun confirmarBorrar() {
         AlertDialog.Builder(this)
-            .setTitle("¿Borrar esta grabación?")
-            .setMessage("También se borran sus marcas. No se puede deshacer.")
-            .setPositiveButton("Borrar") { _, _ ->
+            .setTitle(resources.getQuantityString(R.plurals.borrar_grabaciones, 1, 1))
+            .setMessage(R.string.borrar_mensaje)
+            .setPositiveButton(R.string.borrar) { _, _ ->
                 if (esta()) enviar(PlayerService.ACT_CERRAR)
                 val fallidos = Biblioteca.borrarUris(this, listOfNotNull(uri, marcasUri))
                 if (fallidos.isNotEmpty() && Build.VERSION.SDK_INT >= 30) {
@@ -294,14 +307,14 @@ class ReproductorActivity : Activity() {
                         val pi = MediaStore.createDeleteRequest(contentResolver, fallidos)
                         startIntentSenderForResult(pi.intentSender, REQ_BORRAR, null, 0, 0, 0)
                     } catch (e: Exception) {
-                        Toast.makeText(this, "No se pudo borrar: ${e.message}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, getString(R.string.error_borrar, e.message ?: ""), Toast.LENGTH_LONG).show()
                     }
                 } else {
-                    Toast.makeText(this, "Borrado", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.borrado, Toast.LENGTH_SHORT).show()
                     finish()
                 }
             }
-            .setNegativeButton("Cancelar", null)
+            .setNegativeButton(R.string.cancelar, null)
             .show()
     }
 

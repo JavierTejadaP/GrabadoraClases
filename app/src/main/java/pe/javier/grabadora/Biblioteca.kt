@@ -1,10 +1,11 @@
 package pe.javier.grabadora
 
 import android.content.ContentResolver
-import android.content.ContentValues
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
@@ -12,10 +13,11 @@ import android.provider.MediaStore
 import java.util.Locale
 
 data class Grabacion(
+    val id: Long,
     val uri: Uri,
     val nombre: String,
-    val curso: String?,      // null = grabación libre
-    val tipo: String,
+    val curso: Curso?,       // null = grabación libre
+    val tipo: String?,
     val fechaMs: Long,
     val bytes: Long,
     val marcasUri: Uri?,
@@ -25,68 +27,210 @@ data class Grabacion(
     val duracionAproxMs: Long get() = bytes * 8 * 1000 / 48000
 }
 
-/** Lee las grabaciones guardadas en Descargas/GrabadoraClases. */
+/**
+ * Grabaciones de Descargas/GrabadoraClases. Lleva un índice en [BaseDatos] con el curso de cada
+ * una y cuántas marcas tiene, así no hay que abrir todos los archivos cada vez.
+ */
 object Biblioteca {
 
-    private class Fila(val uri: Uri, val nombre: String, val bytes: Long, val fechaMs: Long)
+    const val SUFIJO_MARCAS = " - marcas.txt"
 
+    /** Un archivo visto en la carpeta. [firma] cambia cuando el archivo cambia (tamaño y fecha). */
+    private class Archivo(val uri: Uri, val nombre: String, val bytes: Long, val fechaMs: Long, val firma: Long)
+
+    private class Fila(val id: Long, val uri: String, val bytes: Long, val marcasUri: String?, val marcasFirma: Long?)
+
+    // ---------------- cargar ----------------
+
+    /**
+     * Pone al día el índice con lo que hay en la carpeta y devuelve las grabaciones, de la más
+     * reciente a la más antigua. Hace E/S: llamar fuera del hilo principal.
+     */
+    @Synchronized
     fun cargar(ctx: Context): List<Grabacion> {
-        val cr = ctx.contentResolver
+        sincronizar(ctx)
+        return leer(ctx)
+    }
+
+    private fun archivoActual(): String? =
+        if (RecorderService.estado != RecorderService.Estado.DETENIDO) RecorderService.archivoActual else null
+
+    private fun sincronizar(ctx: Context) {
+        val audios = LinkedHashMap<String, Archivo>()
+        val marcas = HashMap<String, Archivo>()
+        for (f in listarMediaStore(ctx) + listarCarpeta(ctx)) {
+            when {
+                f.nombre.endsWith(".aac", ignoreCase = true) -> audios.putIfAbsent(f.nombre, f)
+                f.nombre.endsWith(SUFIJO_MARCAS) -> marcas.putIfAbsent(f.nombre.removeSuffix(SUFIJO_MARCAS), f)
+            }
+        }
+        val actual = archivoActual()
+        val db = BaseDatos.de(ctx).writableDatabase
+
+        val filas = HashMap<String, Fila>()
+        db.rawQuery("SELECT id, archivo, uri, bytes, marcas_uri, marcas_firma FROM grabaciones", null).use { c ->
+            while (c.moveToNext()) {
+                filas[c.getString(1)] = Fila(
+                    c.getLong(0), c.getString(2), c.getLong(3), c.getString(4),
+                    if (c.isNull(5)) null else c.getLong(5)
+                )
+            }
+        }
+
+        // Los cursos de los archivos nuevos se resuelven antes de abrir la transacción
+        val nuevos = audios.keys.filter { it !in filas && it != actual }.associateWith { cursoYTipo(ctx, it) }
+
+        db.beginTransaction()
+        try {
+            for ((nombre, f) in audios) {
+                if (nombre == actual) continue
+                val m = marcas[base(nombre)]
+                val fila = filas[nombre]
+                val v = ContentValues()
+                if (fila == null) {
+                    val (curso, tipo) = nuevos.getValue(nombre)
+                    v.put("archivo", nombre)
+                    v.put("uri", f.uri.toString())
+                    v.put("curso_id", curso?.id)
+                    v.put("tipo", tipo)
+                    v.put("fecha_ms", f.fechaMs)
+                    v.put("bytes", f.bytes)
+                    ponerMarcas(ctx, v, m)
+                    db.insertWithOnConflict("grabaciones", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+                    continue
+                }
+                if (fila.uri != f.uri.toString() || fila.bytes != f.bytes) {
+                    v.put("uri", f.uri.toString())
+                    v.put("bytes", f.bytes)
+                }
+                when {
+                    m == null -> if (fila.marcasUri != null) ponerMarcas(ctx, v, null)
+                    m.uri.toString() != fila.marcasUri -> ponerMarcas(ctx, v, m)
+                    // La app las acaba de escribir y ya sabe cuántas son: solo se anota la firma
+                    fila.marcasFirma == null -> v.put("marcas_firma", m.firma)
+                    fila.marcasFirma != m.firma -> ponerMarcas(ctx, v, m)
+                }
+                if (v.size() > 0) db.update("grabaciones", v, "id = ?", arrayOf(fila.id.toString()))
+            }
+            // Las que ya no están en la carpeta (borradas desde otra app, o sin acceso tras reinstalar)
+            for ((nombre, fila) in filas) {
+                if (nombre !in audios && nombre != actual) db.delete("grabaciones", "id = ?", arrayOf(fila.id.toString()))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun leer(ctx: Context): List<Grabacion> {
+        val actual = archivoActual()
+        val lista = mutableListOf<Grabacion>()
+        BaseDatos.de(ctx).readableDatabase.rawQuery(
+            "SELECT id, uri, archivo, curso_id, tipo, fecha_ms, bytes, marcas_uri, num_marcas " +
+                "FROM grabaciones ORDER BY fecha_ms DESC", null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val archivo = c.getString(2)
+                if (archivo == actual) continue
+                lista.add(
+                    Grabacion(
+                        id = c.getLong(0),
+                        uri = Uri.parse(c.getString(1)),
+                        nombre = archivo,
+                        curso = Horario.curso(if (c.isNull(3)) null else c.getLong(3)),
+                        tipo = c.getString(4),
+                        fechaMs = c.getLong(5),
+                        bytes = c.getLong(6),
+                        marcasUri = c.getString(7)?.let { Uri.parse(it) },
+                        numMarcas = c.getInt(8),
+                    )
+                )
+            }
+        }
+        return lista
+    }
+
+    private fun base(nombreAudio: String) = nombreAudio.dropLast(4)   // sin ".aac"
+
+    /** "Calculo I - Teoria - 2026-10-17.aac" -> (Cálculo I, teoría). "Grabacion - …" -> (null, null). */
+    private fun cursoYTipo(ctx: Context, nombreAudio: String): Pair<Curso?, String?> {
+        val partes = base(nombreAudio).split(" - ")
+        if (partes.size < 3 || partes[0] == "Grabacion") return null to null
+        return Horario.cursoParaArchivo(ctx, partes[0]) to Horario.tipoDeTexto(partes[1])
+    }
+
+    private fun ponerMarcas(ctx: Context, v: ContentValues, m: Archivo?) {
+        if (m == null) {
+            v.putNull("marcas_uri")
+            v.putNull("marcas_firma")
+            v.put("num_marcas", 0)
+        } else {
+            v.put("marcas_uri", m.uri.toString())
+            v.put("marcas_firma", m.firma)
+            v.put("num_marcas", contarMarcas(ctx.contentResolver, m.uri))
+        }
+    }
+
+    private fun listarMediaStore(ctx: Context): List<Archivo> {
         val coleccion = MediaStore.Downloads.EXTERNAL_CONTENT_URI
         val proyeccion = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
         )
-        val audios = mutableListOf<Fila>()
-        val marcas = mutableMapOf<String, Uri>()
-
-        cr.query(
-            coleccion, proyeccion,
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
-            arrayOf("${Environment.DIRECTORY_DOWNLOADS}/${RecorderService.CARPETA}%"),
-            null
-        )?.use { c ->
-            val iId = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-            val iNombre = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val iTam = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-            val iFecha = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
-            while (c.moveToNext()) {
-                val nombre = c.getString(iNombre) ?: continue
-                val uri = ContentUris.withAppendedId(coleccion, c.getLong(iId))
-                when {
-                    nombre.endsWith(".aac", ignoreCase = true) ->
-                        audios.add(Fila(uri, nombre, c.getLong(iTam), c.getLong(iFecha) * 1000))
-                    nombre.endsWith(" - marcas.txt") ->
-                        marcas[nombre.removeSuffix(" - marcas.txt")] = uri
+        val lista = mutableListOf<Archivo>()
+        runCatching {
+            ctx.contentResolver.query(
+                coleccion, proyeccion,
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                arrayOf("${Environment.DIRECTORY_DOWNLOADS}/${RecorderService.CARPETA}%"),
+                null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val nombre = c.getString(1) ?: continue
+                    val bytes = c.getLong(2)
+                    lista.add(
+                        Archivo(
+                            ContentUris.withAppendedId(coleccion, c.getLong(0)), nombre, bytes,
+                            c.getLong(3) * 1000, bytes * 31 + c.getLong(4)
+                        )
+                    )
                 }
             }
         }
+        return lista
+    }
 
-        // Archivos de una instalación anterior: MediaStore ya no los muestra, pero la carpeta con acceso sí
-        val vistos = audios.map { it.nombre }.toHashSet()
-        for (f in listarCarpeta(ctx)) {
-            when {
-                f.nombre.endsWith(".aac", ignoreCase = true) -> if (vistos.add(f.nombre)) audios.add(f)
-                f.nombre.endsWith(" - marcas.txt") -> marcas.putIfAbsent(f.nombre.removeSuffix(" - marcas.txt"), f.uri)
-            }
+    // ---------------- registrar desde la app ----------------
+
+    /** La grabadora anota la grabación apenas la crea, con su curso exacto. */
+    fun registrar(ctx: Context, archivo: String, uri: Uri, curso: Curso?, tipo: String?) {
+        val v = ContentValues().apply {
+            put("archivo", archivo)
+            put("uri", uri.toString())
+            put("curso_id", curso?.id)
+            put("tipo", tipo)
+            put("fecha_ms", System.currentTimeMillis())
+            put("bytes", 0L)
         }
+        runCatching {
+            BaseDatos.de(ctx).writableDatabase
+                .insertWithOnConflict("grabaciones", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
 
-        val actual = if (RecorderService.estado != RecorderService.Estado.DETENIDO) RecorderService.archivoActual else null
-
-        return audios
-            .filter { it.nombre != actual }
-            .map { f ->
-                val base = f.nombre.dropLast(4)
-                val partes = base.split(" - ")
-                val esCurso = partes.size >= 3 && partes[0] != "Grabacion"
-                val curso = if (esCurso) Horario.cursoDe(partes[0]) else null
-                val tipo = if (esCurso) Horario.tipoDe(partes[1]) else "Grabación libre"
-                val mUri = marcas[base]
-                Grabacion(f.uri, f.nombre, curso, tipo, f.fechaMs, f.bytes, mUri, mUri?.let { contarMarcas(cr, it) } ?: 0)
-            }
-            .sortedByDescending { it.fechaMs }
+    /** Anota el archivo de marcas y cuántas tiene, después de escribirlo. */
+    fun actualizarMarcas(ctx: Context, archivo: String, marcasUri: Uri?, num: Int) {
+        val v = ContentValues().apply {
+            put("marcas_uri", marcasUri?.toString())
+            putNull("marcas_firma")
+            put("num_marcas", num)
+        }
+        runCatching {
+            BaseDatos.de(ctx).writableDatabase.update("grabaciones", v, "archivo = ?", arrayOf(archivo))
+        }
     }
 
     // ---------------- carpeta con acceso (reinstalación) ----------------
@@ -122,27 +266,30 @@ object Biblioteca {
         cr.takePersistableUriPermission(tree, flags)
     }
 
-    private fun listarCarpeta(ctx: Context): List<Fila> {
+    private fun listarCarpeta(ctx: Context): List<Archivo> {
         val tree = carpetaConAcceso(ctx) ?: return emptyList()
-        val hijos = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-        val proyeccion = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_SIZE,
-            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-        )
-        val filas = mutableListOf<Fila>()
+        val lista = mutableListOf<Archivo>()
         runCatching {
+            val hijos = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+            val proyeccion = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            )
             ctx.contentResolver.query(hijos, proyeccion, null, null, null)?.use { c ->
                 while (c.moveToNext()) {
                     val nombre = c.getString(1) ?: continue
                     val uri = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0))
-                    filas.add(Fila(uri, nombre, c.getLong(2), c.getLong(3)))
+                    val bytes = c.getLong(2)
+                    lista.add(Archivo(uri, nombre, bytes, c.getLong(3), bytes * 31 + c.getLong(3)))
                 }
             }
         }
-        return filas
+        return lista
     }
+
+    // ---------------- marcas ----------------
 
     private fun contarMarcas(cr: ContentResolver, uri: Uri): Int = runCatching {
         cr.openInputStream(uri)?.bufferedReader()?.use { r -> r.lineSequence().count { it.startsWith("Marca ") } } ?: 0
@@ -152,9 +299,72 @@ object Biblioteca {
         cr.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
     }.getOrDefault("")
 
+    /** Busca el archivo de marcas de una grabación por su nombre. */
+    fun buscarMarcas(ctx: Context, nombreAudio: String): Uri? {
+        if (nombreAudio.isEmpty()) return null
+        runCatching {
+            BaseDatos.de(ctx).readableDatabase.rawQuery(
+                "SELECT marcas_uri FROM grabaciones WHERE archivo = ?", arrayOf(nombreAudio)
+            ).use { c -> if (c.moveToFirst() && !c.isNull(0)) return Uri.parse(c.getString(0)) }
+        }
+        val coleccion = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val nombreMarcas = base(nombreAudio) + SUFIJO_MARCAS
+        return ctx.contentResolver.query(
+            coleccion, arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+            arrayOf(nombreMarcas), null
+        )?.use { c -> if (c.moveToFirst()) ContentUris.withAppendedId(coleccion, c.getLong(0)) else null }
+            ?: listarCarpeta(ctx).firstOrNull { it.nombre == nombreMarcas }?.uri
+    }
+
+    private val reMarca = Regex("""Marca \d+ - (\d+):(\d{2}):(\d{2})""")
+
+    fun parsearMarcas(texto: String): List<Long> =
+        reMarca.findAll(texto).map { m ->
+            val (h, mi, s) = m.destructured
+            (h.toLong() * 3600 + mi.toLong() * 60 + s.toLong()) * 1000
+        }.toList()
+
+    /** Texto del archivo de marcas. El formato no se traduce: la app lo vuelve a leer. */
+    fun textoMarcas(titulo: String, nombreAudio: String, lista: List<Long>): String = buildString {
+        appendLine(titulo)
+        appendLine(nombreAudio)
+        appendLine()
+        lista.forEachIndexed { i, ms -> appendLine("Marca ${i + 1} - ${Horario.fmt(ms)}") }
+    }
+
+    /** Escribe (o crea) el archivo de marcas de una grabación. Devuelve su Uri. */
+    fun guardarMarcas(ctx: Context, nombreAudio: String, existente: Uri?, titulo: String, lista: List<Long>): Uri? {
+        val cr = ctx.contentResolver
+        var u = existente
+        try {
+            if (u == null) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, base(nombreAudio) + SUFIJO_MARCAS)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + RecorderService.CARPETA)
+                }
+                u = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            }
+            val texto = textoMarcas(titulo, nombreAudio, lista)
+            u?.let { cr.openOutputStream(it, "wt")?.use { o -> o.write(texto.toByteArray(Charsets.UTF_8)) } }
+        } catch (_: Exception) {
+        }
+        actualizarMarcas(ctx, nombreAudio, u, lista.size)
+        return u
+    }
+
+    // ---------------- borrar ----------------
+
     /** Borra audio + marcas. Devuelve los que el sistema no dejó borrar directo. */
-    fun borrar(ctx: Context, lista: List<Grabacion>): List<Uri> =
-        borrarUris(ctx, lista.flatMap { listOfNotNull(it.uri, it.marcasUri) })
+    fun borrar(ctx: Context, lista: List<Grabacion>): List<Uri> {
+        val fallidos = borrarUris(ctx, lista.flatMap { listOfNotNull(it.uri, it.marcasUri) })
+        val db = BaseDatos.de(ctx).writableDatabase
+        for (g in lista) {
+            if (g.uri !in fallidos) runCatching { db.delete("grabaciones", "id = ?", arrayOf(g.id.toString())) }
+        }
+        return fallidos
+    }
 
     fun borrarUris(ctx: Context, uris: List<Uri>): List<Uri> {
         val fallidos = mutableListOf<Uri>()
@@ -172,58 +382,14 @@ object Biblioteca {
         return fallidos
     }
 
-    /** Busca el archivo de marcas de una grabación por su nombre. */
-    fun buscarMarcas(ctx: Context, nombreAudio: String): Uri? {
-        if (nombreAudio.isEmpty()) return null
-        val coleccion = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val nombreMarcas = nombreAudio.removeSuffix(".aac") + " - marcas.txt"
-        return ctx.contentResolver.query(
-            coleccion, arrayOf(MediaStore.MediaColumns._ID),
-            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
-            arrayOf(nombreMarcas), null
-        )?.use { c -> if (c.moveToFirst()) ContentUris.withAppendedId(coleccion, c.getLong(0)) else null }
-            ?: listarCarpeta(ctx).firstOrNull { it.nombre == nombreMarcas }?.uri
-    }
+    // ---------------- formato ----------------
 
-    private val reMarca = Regex("""Marca \d+ - (\d+):(\d{2}):(\d{2})""")
-
-    fun parsearMarcas(texto: String): List<Long> =
-        reMarca.findAll(texto).map { m ->
-            val (h, mi, s) = m.destructured
-            (h.toLong() * 3600 + mi.toLong() * 60 + s.toLong()) * 1000
-        }.toList()
-
-    /** Escribe (o crea) el archivo de marcas de una grabación. Devuelve su Uri. */
-    fun guardarMarcas(ctx: Context, nombreAudio: String, existente: Uri?, titulo: String, lista: List<Long>): Uri? {
-        val cr = ctx.contentResolver
-        var u = existente
-        try {
-            if (u == null) {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, nombreAudio.removeSuffix(".aac") + " - marcas.txt")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + RecorderService.CARPETA)
-                }
-                u = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            }
-            val texto = buildString {
-                appendLine(titulo)
-                appendLine(nombreAudio)
-                appendLine()
-                lista.forEachIndexed { i, ms -> appendLine("Marca ${i + 1} - ${Horario.fmt(ms)}") }
-            }
-            u?.let { cr.openOutputStream(it, "wt")?.use { o -> o.write(texto.toByteArray(Charsets.UTF_8)) } }
-        } catch (_: Exception) {
-        }
-        return u
-    }
-
-    fun fmtDuracion(ms: Long): String {
+    fun fmtDuracion(ctx: Context, ms: Long): String {
         val min = ms / 60000
         return when {
-            min < 1 -> "<1 min"
-            min < 60 -> "~$min min"
-            else -> "~${min / 60} h ${min % 60} min"
+            min < 1 -> ctx.getString(R.string.duracion_menos_minuto)
+            min < 60 -> ctx.getString(R.string.duracion_minutos, min)
+            else -> ctx.getString(R.string.duracion_horas, min / 60, min % 60)
         }
     }
 

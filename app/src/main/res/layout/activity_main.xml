@@ -24,7 +24,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Grabadora de clases"
+            android:text="@string/titulo_app"
             android:textColor="@color/texto"
             android:textSize="26sp"
             android:textStyle="bold" />
@@ -85,7 +85,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cambiar"
+                android:text="@string/cambiar"
                 android:textColor="@color/acento"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -142,7 +142,7 @@
                 android:layout_height="120dp"
                 android:layout_gravity="center"
                 android:background="@drawable/bg_btn_grabar"
-                android:contentDescription="Grabar"
+                android:contentDescription="@string/grabar"
                 android:elevation="6dp"
                 android:padding="38dp"
                 android:scaleType="fitCenter"
@@ -169,7 +169,7 @@
                     android:layout_width="64dp"
                     android:layout_height="64dp"
                     android:background="@drawable/bg_btn_redondo"
-                    android:contentDescription="Pausar"
+                    android:contentDescription="@string/pausar"
                     android:padding="20dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_pause" />
@@ -179,7 +179,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="Pausar"
+                    android:text="@string/pausar"
                     android:textColor="@color/texto2"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -200,7 +200,7 @@
                     android:layout_width="64dp"
                     android:layout_height="64dp"
                     android:background="@drawable/bg_btn_redondo"
-                    android:contentDescription="Marcar"
+                    android:contentDescription="@string/marcar"
                     android:padding="20dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_flag"
@@ -210,7 +210,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="Marcar"
+                    android:text="@string/marcar"
                     android:textColor="@color/texto2"
                     android:textSize="13sp" />
             </LinearLayout>
@@ -251,7 +251,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Mis grabaciones"
+                    android:text="@string/mis_grabaciones"
                     android:textColor="@color/texto"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -299,7 +299,7 @@
             android:paddingTop="8dp"
             android:paddingEnd="16dp"
             android:paddingBottom="8dp"
-            android:text="Mi horario"
+            android:text="@string/mi_horario"
             android:textColor="@color/texto2"
             android:textSize="13sp" />
 
@@ -314,7 +314,7 @@
             android:paddingTop="8dp"
             android:paddingEnd="16dp"
             android:paddingBottom="8dp"
-            android:text="Configurar batería"
+            android:text="@string/configurar_bateria"
             android:textColor="@color/texto2"
             android:textSize="13sp" />
         </LinearLayout>

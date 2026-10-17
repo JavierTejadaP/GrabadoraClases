@@ -9,6 +9,10 @@ import android.os.Looper
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import pe.javier.grabadora.RecorderService.Estado
 import java.util.Locale
 
@@ -23,14 +27,20 @@ class GrabandoActivity : Activity() {
     private lateinit var btnPausar: ImageButton
 
     private val handler = Handler(Looper.getMainLooper())
+    private var scope: CoroutineScope? = null
     private var vioGrabando = false
-    private val abiertaEn = android.os.SystemClock.elapsedRealtime()
 
-    private val tick = object : Runnable {
+    /** Solo mientras se graba: centésimas en el reloj. */
+    private val reloj = object : Runnable {
         override fun run() {
-            refrescar()
+            tvTiempo.text = formatear(RecorderService.tiempoMs())
             handler.postDelayed(this, 33)
         }
+    }
+
+    /** Si a los 4 s no arrancó (permiso, micrófono ocupado…), se cierra la pantalla. */
+    private val noArranco = Runnable {
+        if (!vioGrabando && RecorderService.estado == Estado.DETENIDO) finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,17 +64,35 @@ class GrabandoActivity : Activity() {
         }
         findViewById<ImageButton>(R.id.btnMarcar).setOnClickListener { enviar(RecorderService.ACT_MARK) }
         findViewById<ImageButton>(R.id.btnTerminar).setOnClickListener { confirmarTerminar() }
+        handler.postDelayed(noArranco, 4000)
     }
 
-    override fun onResume() {
-        super.onResume()
-        handler.post(tick)
+    override fun onStart() {
+        super.onStart()
+        val s = MainScope()
+        scope = s
+        s.launch { RecorderService.flujo.collect { pintar(it) } }
+        s.launch {
+            RecorderService.error.collect { e ->
+                if (e != null) {
+                    Toast.makeText(this@GrabandoActivity, e, Toast.LENGTH_LONG).show()
+                    RecorderService.error.value = null
+                }
+            }
+        }
         onda.invalidate()
     }
 
-    override fun onPause() {
-        super.onPause()
-        handler.removeCallbacks(tick)
+    override fun onStop() {
+        scope?.cancel()
+        scope = null
+        handler.removeCallbacks(reloj)
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     private fun enviar(accion: String) {
@@ -73,55 +101,44 @@ class GrabandoActivity : Activity() {
 
     private fun confirmarTerminar() {
         AlertDialog.Builder(this)
-            .setTitle("¿Terminar la grabación?")
-            .setMessage("Se guardará lo grabado (${Horario.fmt(RecorderService.tiempoMs())}).")
-            .setPositiveButton("Terminar") { _, _ -> enviar(RecorderService.ACT_STOP) }
-            .setNegativeButton("Seguir grabando", null)
+            .setTitle(R.string.terminar_titulo)
+            .setMessage(getString(R.string.terminar_mensaje, Horario.fmt(RecorderService.tiempoMs())))
+            .setPositiveButton(R.string.terminar) { _, _ -> enviar(RecorderService.ACT_STOP) }
+            .setNegativeButton(R.string.seguir_grabando, null)
             .show()
     }
 
-    private fun refrescar() {
-        val e = RecorderService.estado
-        if (e != Estado.DETENIDO) vioGrabando = true
+    private fun pintar(inst: RecorderService.Instantanea) {
+        val e = inst.estado
         if (e == Estado.DETENIDO) {
             // Terminó (desde aquí, la notificación o por un error)
             if (vioGrabando) {
-                RecorderService.ultimoArchivo?.let {
-                    Toast.makeText(this, "Guardado: ${it.removeSuffix(".aac")}", Toast.LENGTH_LONG).show()
+                inst.ultimoArchivo?.let {
+                    Toast.makeText(this, getString(R.string.guardado, it.removeSuffix(".aac")), Toast.LENGTH_LONG).show()
                 }
-                finish()
-            } else if (android.os.SystemClock.elapsedRealtime() - abiertaEn > 4000) {
-                // No llegó a arrancar (permiso, micrófono ocupado…)
-                RecorderService.error?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
-                RecorderService.error = null
                 finish()
             }
             return
         }
+        vioGrabando = true
 
         tvTiempo.text = formatear(RecorderService.tiempoMs())
         tvTiempo.alpha = if (e == Estado.PAUSADO) 0.5f else 1f
-        tvSub.text = RecorderService.titulo.ifBlank { "Grabación libre" }
+        handler.removeCallbacks(reloj)
+        if (e == Estado.GRABANDO) handler.post(reloj)
+
+        tvSub.text = inst.titulo.ifBlank { getString(R.string.grabacion_libre) }
         onda.activo = e == Estado.GRABANDO
         btnPausar.setImageResource(if (e == Estado.PAUSADO) R.drawable.ic_play else R.drawable.ic_pause)
-        btnPausar.contentDescription = if (e == Estado.PAUSADO) "Reanudar" else "Pausar"
+        btnPausar.contentDescription = getString(if (e == Estado.PAUSADO) R.string.reanudar else R.string.pausar)
 
         tvAviso.text = when {
-            e == Estado.PAUSADO -> "En pausa"
-            RecorderService.advertencia != null -> "⚠ ${RecorderService.advertencia}"
+            e == Estado.PAUSADO -> getString(R.string.en_pausa)
+            inst.advertencia != null -> getString(R.string.advertencia_con_icono, inst.advertencia)
             else -> ""
         }
-        val n = RecorderService.numMarcas()
-        tvMarcas.text = when (n) {
-            0 -> ""
-            1 -> "⚑ 1 marca"
-            else -> "⚑ $n marcas"
-        }
-
-        RecorderService.error?.let {
-            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
-            RecorderService.error = null
-        }
+        tvMarcas.text = if (inst.numMarcas == 0) ""
+        else resources.getQuantityString(R.plurals.marcas_con_icono, inst.numMarcas, inst.numMarcas)
     }
 
     /** 00:04.26 · o 1:02:03.45 si pasa la hora. */
