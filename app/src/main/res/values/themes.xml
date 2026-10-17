@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Base.AppTheme" parent="android:Theme.Material">
+        <item name="android:colorPrimary">@color/fondo</item>
+        <item name="android:colorPrimaryDark">@color/fondo</item>
+        <item name="android:colorAccent">@color/acento</item>
+        <item name="android:colorBackground">@color/fondo</item>
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:statusBarColor">@color/fondo</item>
+        <item name="android:navigationBarColor">@color/fondo</item>
+        <item name="android:textColorPrimary">@color/texto</item>
+        <item name="android:textColorSecondary">@color/texto2</item>
+        <item name="android:actionBarStyle">@style/AppTheme.ActionBar</item>
+        <item name="android:actionModeBackground">@color/superficie2</item>
+        <item name="android:alertDialogTheme">@style/AppTheme.Dialogo</item>
+    </style>
+
+    <style name="AppTheme" parent="Base.AppTheme" />
+
+    <style name="AppTheme.NoBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="AppTheme.ActionBar" parent="android:Widget.Material.ActionBar.Solid">
+        <item name="android:background">@color/fondo</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <style name="AppTheme.Dialogo" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/acento</item>
+        <item name="android:colorBackground">@color/superficie</item>
+    </style>
+
+    <style name="Chip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:background">@drawable/bg_chip</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:drawablePadding">6dp</item>
+        <item name="android:drawableTint">@color/texto</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:textColor">@color/texto</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+</resources>

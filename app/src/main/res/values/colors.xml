@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fondo">#0F1115</color>
+    <color name="superficie">#1A1D23</color>
+    <color name="superficie2">#262A33</color>
+    <color name="texto">#F2F3F5</color>
+    <color name="texto2">#9AA0AA</color>
+    <color name="acento">#E5484D</color>
+    <color name="marca">#F5A524</color>
+    <color name="toque">#22FFFFFF</color>
+</resources>

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <ImageButton
+        android:id="@+id/btnVolver"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_margin="4dp"
+        android:background="@drawable/bg_btn_redondo"
+        android:backgroundTint="@android:color/transparent"
+        android:contentDescription="Volver"
+        android:padding="16dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_back"
+        android:tint="@color/texto" />
+
+    <TextView
+        android:id="@+id/tvTiempo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:fontFamily="sans-serif-light"
+        android:fontFeatureSettings="tnum"
+        android:gravity="center"
+        android:text="00:00.00"
+        android:textColor="@color/texto"
+        android:textSize="64sp" />
+
+    <TextView
+        android:id="@+id/tvSub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:gravity="center"
+        android:textColor="@color/texto2"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/tvAviso"
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:textColor="@color/marca"
+        android:textSize="14sp" />
+
+    <pe.javier.grabadora.Onda
+        android:id="@+id/onda"
+        android:layout_width="match_parent"
+        android:layout_height="270dp"
+        android:layout_marginTop="28dp" />
+
+    <TextView
+        android:id="@+id/tvMarcas"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:textColor="@color/marca"
+        android:textSize="14sp" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="40dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/btnPausar"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:background="@drawable/bg_btn_redondo"
+            android:contentDescription="Pausar"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_pause" />
+
+        <ImageButton
+            android:id="@+id/btnTerminar"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:layout_marginStart="48dp"
+            android:layout_marginEnd="48dp"
+            android:background="@drawable/bg_btn_grabar"
+            android:contentDescription="Terminar y guardar"
+            android:elevation="6dp"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_check" />
+
+        <ImageButton
+            android:id="@+id/btnMarcar"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:background="@drawable/bg_btn_redondo"
+            android:contentDescription="Marcar"
+            android:padding="24dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_flag"
+            android:tint="@color/marca" />
+    </LinearLayout>
+</LinearLayout>
