@@ -168,7 +168,7 @@ class MainActivity : Activity() {
         tvCursoLabel.setText(
             when {
                 o.curso == null -> R.string.etiqueta_sin_curso
-                ahora?.curso?.id == o.curso.id && ahora.tipo == o.tipo -> R.string.etiqueta_ahora_en_clase
+                ahora != null && ahora.curso.id == o.curso.id && ahora.tipo == o.tipo -> R.string.etiqueta_ahora_en_clase
                 else -> R.string.etiqueta_curso_elegido
             }
         )
