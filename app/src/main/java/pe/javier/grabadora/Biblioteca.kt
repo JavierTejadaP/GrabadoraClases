@@ -22,6 +22,7 @@ data class Grabacion(
     val bytes: Long,
     val marcasUri: Uri?,
     val numMarcas: Int,
+    val tema: String? = null,
 ) {
     /** Estimada por tamaño: se graba a 48 kbps. */
     val duracionAproxMs: Long get() = bytes * 8 * 1000 / 48000
@@ -126,7 +127,7 @@ object Biblioteca {
         val actual = archivoActual()
         val lista = mutableListOf<Grabacion>()
         BaseDatos.de(ctx).readableDatabase.rawQuery(
-            "SELECT id, uri, archivo, curso_id, tipo, fecha_ms, bytes, marcas_uri, num_marcas " +
+            "SELECT id, uri, archivo, curso_id, tipo, fecha_ms, bytes, marcas_uri, num_marcas, tema " +
                 "FROM grabaciones ORDER BY fecha_ms DESC", null
         ).use { c ->
             while (c.moveToNext()) {
@@ -143,6 +144,7 @@ object Biblioteca {
                         bytes = c.getLong(6),
                         marcasUri = c.getString(7)?.let { Uri.parse(it) },
                         numMarcas = c.getInt(8),
+                        tema = c.getString(9)?.takeIf { it.isNotBlank() },
                     )
                 )
             }
@@ -231,6 +233,29 @@ object Biblioteca {
         runCatching {
             BaseDatos.de(ctx).writableDatabase.update("grabaciones", v, "archivo = ?", arrayOf(archivo))
         }
+    }
+
+    /** Tema de la clase ("Derivadas parciales"). Vacío lo borra. */
+    fun ponerTema(ctx: Context, archivo: String, tema: String?) {
+        val v = ContentValues().apply { put("tema", tema?.trim()?.takeIf { it.isNotEmpty() }) }
+        runCatching {
+            BaseDatos.de(ctx).writableDatabase.update("grabaciones", v, "archivo = ?", arrayOf(archivo))
+        }
+    }
+
+    // ---------------- búsqueda ----------------
+
+    private fun normalizar(s: String) = Horario.sinTildes(s).lowercase(Locale.ROOT)
+
+    /**
+     * ¿Cada palabra de [consulta] aparece en alguno de los [textos]? Sin importar tildes ni
+     * mayúsculas: "derivadas calculo" encuentra la clase de Cálculo con tema "Derivadas".
+     */
+    fun coincide(textos: List<String?>, consulta: String): Boolean {
+        val palabras = normalizar(consulta).split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (palabras.isEmpty()) return true
+        val todo = textos.filterNotNull().joinToString(" ") { normalizar(it) }
+        return palabras.all { it in todo }
     }
 
     // ---------------- carpeta con acceso (reinstalación) ----------------

@@ -16,6 +16,16 @@ para volver a ellos después.
   de bloqueo, velocidades de 0.75x a 2x y recuerda dónde te quedaste.
 - **Mis grabaciones**: ordenadas por curso, para compartir o borrar varias a la vez.
   Mantén presionado un curso para renombrarlo o cambiarle el color; sus grabaciones lo siguen.
+- **Avisos de clase**: 5 min antes de cada clase llega una notificación con botón *Grabar*;
+  al terminar, si sigues grabando, te pregunta si detener. Opcional: detener sola 15 min
+  después. Se configuran en *Mi horario → Avisos de clase*.
+- **Tema de la clase**: al terminar de grabar te pregunta de qué trató ("Derivadas parciales");
+  se puede cambiar desde el reproductor. La lista muestra el tema en vez de solo la fecha.
+- **Buscador**: en *Mis grabaciones*, por tema, curso, tipo o fecha, sin importar tildes.
+- **Ajustes rápidos**: botón *Grabar clase* en el panel que se baja desde arriba
+  (edítalo con el lápiz del panel para agregarlo).
+- **Exportar curso**: un ZIP con todas las grabaciones del curso, sus marcas y un índice,
+  guardado donde elijas (Descargas, Drive…).
 
 ## Cómo está hecha
 

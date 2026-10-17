@@ -157,6 +157,7 @@ object Horario {
         }
         limpiarCursos(db)
         leer(db)
+        Avisos.programar(ctx)
     }
 
     @Synchronized
@@ -165,6 +166,7 @@ object Horario {
         db.delete("clases", "id = ?", arrayOf(b.id.toString()))
         limpiarCursos(db)
         leer(db)
+        Avisos.programar(ctx)
     }
 
     /** Renombra o cambia el color. Devuelve false si ya hay otro curso con ese nombre. */

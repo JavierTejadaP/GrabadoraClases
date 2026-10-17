@@ -35,6 +35,19 @@ import java.util.Locale
 
 class MainActivity : Activity() {
 
+    companion object {
+        /** Abrir con una clase elegida y, si [EXTRA_GRABAR], empezar a grabar (aviso de clase, ajustes rápidos). */
+        const val ACCION_GRABAR = "pe.javier.grabadora.GRABAR"
+        const val EXTRA_CURSO_ID = "curso_id"
+        const val EXTRA_TIPO = "tipo"
+        const val EXTRA_GRABAR = "grabar"
+    }
+
+    /** Pedido que llegó por intent y se atiende en onResume, cuando ya está elegida la clase. */
+    private class Pedido(val cursoId: Long?, val tipo: String?, val grabar: Boolean)
+
+    private var pedido: Pedido? = null
+
     private lateinit var tvFecha: TextView
     private lateinit var cardCurso: View
     private lateinit var tvIniciales: TextView
@@ -108,6 +121,42 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.btnBateria).setOnClickListener { configurarBateria() }
         findViewById<View>(R.id.btnHorario).setOnClickListener { abrirHorario() }
+        if (savedInstanceState == null) recibir(intent)
+    }
+
+    override fun onNewIntent(nuevo: Intent) {
+        super.onNewIntent(nuevo)
+        setIntent(nuevo)
+        recibir(nuevo)
+    }
+
+    private fun recibir(i: Intent?) {
+        if (i?.action != ACCION_GRABAR) return
+        pedido = Pedido(
+            i.getLongExtra(EXTRA_CURSO_ID, -1L).takeIf { it >= 0 },
+            i.getStringExtra(EXTRA_TIPO),
+            i.getBooleanExtra(EXTRA_GRABAR, false),
+        )
+    }
+
+    /** Elige la clase del pedido y, si lo pide, empieza a grabar. */
+    private fun atenderPedido() {
+        val p = pedido ?: return
+        pedido = null
+        if (RecorderService.estado != Estado.DETENIDO) {
+            if (p.grabar) abrirGrabando()
+            return
+        }
+        if (p.cursoId != null) {
+            val i = Horario.opciones.indexOfFirst { it.curso?.id == p.cursoId && it.tipo == p.tipo }
+            if (i >= 0) {
+                seleccion = i
+                eleccionManual = true
+                opcionElegida = Horario.opciones[i]
+                mostrarCurso()
+            }
+        }
+        if (p.grabar) iniciar()
     }
 
     override fun onStart() {
@@ -146,6 +195,7 @@ class MainActivity : Activity() {
         }
         seleccion = seleccion.coerceIn(0, Horario.opciones.size - 1)
         mostrarCurso()
+        atenderPedido()
     }
 
     override fun onStop() {

@@ -40,14 +40,17 @@ class ReproductorActivity : Activity() {
         const val EXTRA_MARCAS = "marcas"
         const val EXTRA_BYTES = "bytes"
         const val EXTRA_CURSO_ID = "curso_id"
+        const val EXTRA_TEMA = "tema"
         private const val REQ_BORRAR = 20
         private const val M_ABRIR = 1
         private const val M_BORRAR = 2
+        private const val M_TEMA = 3
     }
 
     private lateinit var uri: Uri
     private var nombre = ""
     private var titulo = ""
+    private var tema: String? = null
     private var marcasUri: Uri? = null
     private val marcas = mutableListOf<Long>()
 
@@ -86,8 +89,8 @@ class ReproductorActivity : Activity() {
         setContentView(R.layout.activity_reproductor)
 
         val curso = Horario.curso(intent.getLongExtra(EXTRA_CURSO_ID, -1L))
-        findViewById<TextView>(R.id.tvTitulo).text = titulo
-        findViewById<TextView>(R.id.tvSubtitulo).text = intent.getStringExtra(EXTRA_SUBTITULO)
+        tema = intent.getStringExtra(EXTRA_TEMA)
+        pintarTitulo()
         findViewById<TextView>(R.id.tvIniciales).apply {
             text = Horario.iniciales(curso?.nombre)
             backgroundTintList = ColorStateList.valueOf(Horario.color(curso))
@@ -159,6 +162,14 @@ class ReproductorActivity : Activity() {
         scope = null
         handler.removeCallbacks(progreso)   // el audio sigue sonando
         super.onStop()
+    }
+
+    /** Con tema: el tema arriba y "Curso - Tipo · fecha" debajo. */
+    private fun pintarTitulo() {
+        val sub = intent.getStringExtra(EXTRA_SUBTITULO) ?: ""
+        val t = tema
+        findViewById<TextView>(R.id.tvTitulo).text = t ?: titulo
+        findViewById<TextView>(R.id.tvSubtitulo).text = if (t == null) sub else getString(R.string.titulo_con_tiempo, titulo, sub)
     }
 
     // ---------------- servicio ----------------
@@ -268,7 +279,8 @@ class ReproductorActivity : Activity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, M_ABRIR, 0, R.string.abrir_con_otra_app)
-        menu.add(0, M_BORRAR, 1, R.string.borrar_grabacion)
+        menu.add(0, M_TEMA, 1, R.string.tema_menu)
+        menu.add(0, M_BORRAR, 2, R.string.borrar_grabacion)
         return true
     }
 
@@ -277,6 +289,12 @@ class ReproductorActivity : Activity() {
             android.R.id.home -> finish()
             M_ABRIR -> abrirCon()
             M_BORRAR -> confirmarBorrar()
+            M_TEMA -> VistaGrabacion.pedirTema(this, tema, R.string.tema_menu, R.string.cancelar) { nuevo ->
+                Biblioteca.ponerTema(this, nombre, nuevo)
+                tema = nuevo
+                intent.putExtra(EXTRA_TEMA, nuevo)   // para que la notificación lo lleve si se vuelve a abrir
+                pintarTitulo()
+            }
             else -> return super.onOptionsItemSelected(item)
         }
         return true

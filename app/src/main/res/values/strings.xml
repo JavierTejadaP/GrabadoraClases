@@ -178,4 +178,43 @@
     <!-- Cursos -->
     <string name="editar_curso">Editar curso</string>
     <string name="sin_cursos">Aún no tienes cursos. Agrega una clase primero.</string>
+
+    <!-- Avisos de clase -->
+    <string name="canal_recordatorios">Avisos de clase</string>
+    <string name="avisos_titulo">Avisos de clase</string>
+    <string name="avisos_inicio">Avisarme %1$d min antes de cada clase</string>
+    <string name="avisos_fin">Avisarme al terminar si sigo grabando</string>
+    <string name="avisos_detener">Detener la grabación sola %1$d min después</string>
+    <string name="avisos_puntuales">Que lleguen puntuales</string>
+    <string name="aviso_empieza">Empieza a las %1$s</string>
+    <string name="aviso_termino_titulo">La clase terminó</string>
+    <string name="aviso_termino_texto">¿Detener la grabación de %1$s?</string>
+    <string name="aviso_detenida_sola_titulo">Grabación detenida</string>
+    <string name="aviso_detenida_sola_texto">%1$s terminó y se guardó la grabación.</string>
+
+    <!-- Tema de la clase -->
+    <string name="tema_pregunta">¿De qué trató la clase?</string>
+    <string name="tema_menu">Tema de la clase</string>
+    <string name="tema_ejemplo">Ej. Derivadas parciales</string>
+    <string name="omitir">Omitir</string>
+
+    <!-- Búsqueda -->
+    <string name="buscar_hint">Buscar por tema, curso o fecha</string>
+    <string name="sin_resultados">No hay grabaciones que coincidan</string>
+
+    <!-- Ajustes rápidos -->
+    <string name="tile_grabar">Grabar clase</string>
+    <string name="tile_grabando">Grabando</string>
+
+    <!-- Exportar -->
+    <string name="exportar_zip">Exportar curso (ZIP)</string>
+    <string name="zip_nombre">%1$s - grabaciones.zip</string>
+    <string name="zip_indice_nombre">indice.txt</string>
+    <string name="exportando">Exportando…</string>
+    <string name="exportando_n">%1$d de %2$d grabaciones</string>
+    <string name="error_exportar">No se pudo exportar: %1$s</string>
+    <plurals name="exportadas">
+        <item quantity="one">Se exportó %d grabación</item>
+        <item quantity="other">Se exportaron %d grabaciones</item>
+    </plurals>
 </resources>

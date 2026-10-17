@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -21,6 +22,7 @@ import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.service.quicksettings.TileService
 import android.widget.Toast
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +41,8 @@ class RecorderService : Service() {
     data class Instantanea(
         val estado: Estado = Estado.DETENIDO,
         val titulo: String = "",
+        val cursoId: Long? = null,
+        val tipo: String? = null,
         val advertencia: String? = null,
         val numMarcas: Int = 0,
         val ultimoArchivo: String? = null,
@@ -276,8 +280,13 @@ class RecorderService : Service() {
         synchronized(marcas) { marcas.clear() }
         marcasUri = null
         publicar {
-            it.copy(estado = Estado.GRABANDO, titulo = tituloNuevo, advertencia = null, numMarcas = 0)
+            it.copy(
+                estado = Estado.GRABANDO, titulo = tituloNuevo, cursoId = curso?.id,
+                tipo = if (curso == null) null else tipo, advertencia = null, numMarcas = 0
+            )
         }
+        Avisos.cancelar(this, Avisos.NOTIF_INICIO)
+        refrescarTile()
 
         // Debe llamarse enseguida tras startForegroundService
         startForeground(NOTIF_ID, construirNotif(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -325,6 +334,7 @@ class RecorderService : Service() {
             audioUri = null
             archivoActual = null
             publicar { it.copy(estado = Estado.DETENIDO) }
+            refrescarTile()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -349,6 +359,7 @@ class RecorderService : Service() {
         }
         acumulado += SystemClock.elapsedRealtime() - desde
         publicar { it.copy(estado = Estado.PAUSADO) }
+        refrescarTile()
         actualizarNotif()
     }
 
@@ -363,6 +374,7 @@ class RecorderService : Service() {
         desde = SystemClock.elapsedRealtime()
         segSinSonido = 0
         publicar { it.copy(estado = Estado.GRABANDO) }
+        refrescarTile()
         actualizarNotif()
     }
 
@@ -390,10 +402,17 @@ class RecorderService : Service() {
         archivoActual = null
         audioUri = null
         publicar { it.copy(estado = Estado.DETENIDO, advertencia = null, ultimoArchivo = nombreReal) }
+        Avisos.cancelar(this, Avisos.NOTIF_FIN)
+        refrescarTile()
         if (pararServicio) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    /** Pide al sistema que actualice el botón de ajustes rápidos. */
+    private fun refrescarTile() {
+        runCatching { TileService.requestListeningState(this, ComponentName(this, GrabarTile::class.java)) }
     }
 
     private fun liberar() {

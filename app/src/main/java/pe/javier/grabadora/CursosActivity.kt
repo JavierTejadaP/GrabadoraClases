@@ -5,6 +5,9 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -12,7 +15,9 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -27,8 +32,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Lista de cursos con cuántas grabaciones tiene cada uno.
- * Mantener presionado un curso: renombrarlo o cambiarle el color.
+ * Lista de cursos con cuántas grabaciones tiene cada uno, con buscador arriba
+ * (por tema, curso o fecha). Mantener presionado un curso: renombrarlo o cambiarle el color.
  */
 class CursosActivity : Activity() {
 
@@ -39,14 +44,48 @@ class CursosActivity : Activity() {
     private class Entrada(val curso: Curso?, val cantidad: Int, val ultima: Long?)
 
     private val fmtCorta = SimpleDateFormat(DateFormat.getBestDateTimePattern(Locale.getDefault(), "dMMM"), Locale.getDefault())
+    private lateinit var vista: VistaGrabacion
+    private lateinit var etBuscar: EditText
+    private lateinit var tvSinResultados: TextView
     private lateinit var lista: ListView
     private lateinit var tvRecuperar: TextView
+    private var todas: List<Grabacion> = emptyList()
     private var entradas: List<Entrada> = emptyList()
+    private var resultados: List<Grabacion> = emptyList()
     private var scope: CoroutineScope? = null
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun buscando() = etBuscar.text.isNotBlank()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         actionBar?.setDisplayHomeAsUpEnabled(true)
+        vista = VistaGrabacion(this)
+
+        etBuscar = EditText(this).apply {
+            setSingleLine()
+            setHint(R.string.buscar_hint)
+            inputType = InputType.TYPE_CLASS_TEXT
+            background = getDrawable(R.drawable.bg_chip)
+            setTextColor(getColor(R.color.texto))
+            setHintTextColor(getColor(R.color.texto2))
+            textSize = 15f
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) = pintarLista()
+            })
+        }
+        tvSinResultados = TextView(this).apply {
+            setText(R.string.sin_resultados)
+            gravity = Gravity.CENTER
+            textSize = 15f
+            setTextColor(getColor(R.color.texto2))
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            visibility = View.GONE
+        }
         lista = ListView(this).apply {
             divider = null
             dividerHeight = 0
@@ -66,8 +105,22 @@ class CursosActivity : Activity() {
         }
         pie.addView(tvRecuperar)
         lista.addFooterView(pie, null, false)
-        setContentView(lista)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(etBuscar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(dp(16), dp(8), dp(16), dp(4))
+            })
+            addView(tvSinResultados)
+            addView(lista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+        setContentView(root)
+
         lista.setOnItemClickListener { _, _, pos, _ ->
+            if (buscando()) {
+                resultados.getOrNull(pos)?.let { vista.abrir(this, it) }
+                return@setOnItemClickListener
+            }
             val e = entradas.getOrNull(pos) ?: return@setOnItemClickListener
             startActivity(
                 Intent(this, GrabacionesActivity::class.java)
@@ -75,6 +128,7 @@ class CursosActivity : Activity() {
             )
         }
         lista.setOnItemLongClickListener { _, _, pos, _ ->
+            if (buscando()) return@setOnItemLongClickListener false
             val curso = entradas.getOrNull(pos)?.curso ?: return@setOnItemLongClickListener false
             DialogoCurso.editar(this, curso) { cargar() }
             true
@@ -96,12 +150,13 @@ class CursosActivity : Activity() {
     private fun cargar() {
         val s = scope ?: return
         s.launch {
-            val todas = withContext(Dispatchers.IO) { Biblioteca.cargar(applicationContext) }
-            mostrar(todas)
+            val nuevas = withContext(Dispatchers.IO) { Biblioteca.cargar(applicationContext) }
+            mostrar(nuevas)
         }
     }
 
-    private fun mostrar(todas: List<Grabacion>) {
+    private fun mostrar(nuevas: List<Grabacion>) {
+        todas = nuevas
         // Cursos del horario y los que tienen grabaciones, aunque ya no estén en el horario
         val ids = (Horario.bloques.map { it.curso.id } + todas.mapNotNull { it.curso?.id }).toSet()
         val cursos = Horario.cursos.filter { it.id in ids }
@@ -110,8 +165,31 @@ class CursosActivity : Activity() {
             return Entrada(c, de.size, de.maxOfOrNull { it.fechaMs })
         }
         entradas = cursos.map { entrada(it) } + entrada(null)
-        tvRecuperar.visibility = if (Biblioteca.carpetaConAcceso(this) == null) View.VISIBLE else View.GONE
+        pintarLista()
+    }
 
+    /** Cursos, o resultados de búsqueda si hay algo escrito. */
+    private fun pintarLista() {
+        if (buscando()) {
+            val consulta = etBuscar.text.toString()
+            resultados = todas.filter { Biblioteca.coincide(vista.textosBusqueda(it), consulta) }
+            tvSinResultados.visibility = if (resultados.isEmpty()) View.VISIBLE else View.GONE
+            tvRecuperar.visibility = View.GONE
+            lista.adapter = object : BaseAdapter() {
+                override fun getCount() = resultados.size
+                override fun getItem(position: Int) = resultados[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                    val v = convertView ?: LayoutInflater.from(parent.context).inflate(R.layout.item_grabacion, parent, false)
+                    vista.pintar(v, resultados[position], conCurso = true)
+                    return v
+                }
+            }
+            return
+        }
+
+        tvSinResultados.visibility = View.GONE
+        tvRecuperar.visibility = if (Biblioteca.carpetaConAcceso(this) == null) View.VISIBLE else View.GONE
         lista.adapter = object : BaseAdapter() {
             override fun getCount() = entradas.size
             override fun getItem(position: Int) = entradas[position]

@@ -1,11 +1,17 @@
 package pe.javier.grabadora
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.TimePickerDialog
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -32,6 +38,7 @@ class HorarioActivity : Activity() {
     companion object {
         private const val M_AGREGAR = 1
         private const val M_CURSOS = 2
+        private const val M_AVISOS = 3
     }
 
     /** Fila de la lista: encabezado de día o una clase. */
@@ -266,6 +273,7 @@ class HorarioActivity : Activity() {
             Horario.guardarClase(this, existente, nombre, dia, ini, fin, Horario.tipos[spTipo.selectedItemPosition])
             cargar()
             dialogo.dismiss()
+            pedirPermisoNotificaciones()
         }
     }
 
@@ -287,11 +295,51 @@ class HorarioActivity : Activity() {
             .show()
     }
 
+    // ---------------- avisos ----------------
+
+    private fun configurarAvisos() {
+        val a = Avisos.ajustes(this)
+        val marcados = booleanArrayOf(a.inicio, a.fin, a.detenerSolo)
+        val opciones = arrayOf(
+            getString(R.string.avisos_inicio, Avisos.MIN_ANTES),
+            getString(R.string.avisos_fin),
+            getString(R.string.avisos_detener, Avisos.MIN_DETENER),
+        )
+        val b = AlertDialog.Builder(this)
+            .setTitle(R.string.avisos_titulo)
+            .setMultiChoiceItems(opciones, marcados) { _, i, v -> marcados[i] = v }
+            .setPositiveButton(R.string.guardar) { _, _ ->
+                Avisos.guardarAjustes(this, Avisos.Ajustes(marcados[0], marcados[1], marcados[2]))
+                if (marcados.any { it }) pedirPermisoNotificaciones()
+            }
+            .setNegativeButton(R.string.cancelar, null)
+        if (!Avisos.puntuales(this)) {
+            // Sin este permiso los avisos pueden llegar hasta 10 min antes (o después, al terminar)
+            b.setNeutralButton(R.string.avisos_puntuales) { _, _ ->
+                runCatching {
+                    startActivity(
+                        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))
+                    )
+                }
+            }
+        }
+        b.show()
+    }
+
+    private fun pedirPermisoNotificaciones() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+    }
+
     // ---------------- menú ----------------
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, M_AGREGAR, 0, R.string.agregar).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-        menu.add(0, M_CURSOS, 1, R.string.editar_curso).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, M_AVISOS, 1, R.string.avisos_titulo).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, M_CURSOS, 2, R.string.editar_curso).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
@@ -300,6 +348,7 @@ class HorarioActivity : Activity() {
             android.R.id.home -> finish()
             M_AGREGAR -> editar(null)
             M_CURSOS -> DialogoCurso.elegirYEditar(this) { cargar() }
+            M_AVISOS -> configurarAvisos()
             else -> return super.onOptionsItemSelected(item)
         }
         return true

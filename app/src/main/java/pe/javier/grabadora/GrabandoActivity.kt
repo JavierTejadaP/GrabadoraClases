@@ -29,6 +29,7 @@ class GrabandoActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var scope: CoroutineScope? = null
     private var vioGrabando = false
+    private var preguntoTema = false
 
     /** Solo mientras se graba: centésimas en el reloj. */
     private val reloj = object : Runnable {
@@ -112,11 +113,19 @@ class GrabandoActivity : Activity() {
         val e = inst.estado
         if (e == Estado.DETENIDO) {
             // Terminó (desde aquí, la notificación o por un error)
-            if (vioGrabando) {
-                inst.ultimoArchivo?.let {
-                    Toast.makeText(this, getString(R.string.guardado, it.removeSuffix(".aac")), Toast.LENGTH_LONG).show()
+            if (vioGrabando && !preguntoTema) {
+                preguntoTema = true
+                handler.removeCallbacks(reloj)
+                val archivo = inst.ultimoArchivo
+                if (archivo == null) {
+                    finish()
+                    return
                 }
-                finish()
+                Toast.makeText(this, getString(R.string.guardado, archivo.removeSuffix(".aac")), Toast.LENGTH_LONG).show()
+                // Se aprovecha que la clase está fresca para anotar de qué trató
+                VistaGrabacion.pedirTema(this, null, R.string.tema_pregunta, R.string.omitir) { tema ->
+                    Biblioteca.ponerTema(this, archivo, tema)
+                }.setOnDismissListener { finish() }
             }
             return
         }

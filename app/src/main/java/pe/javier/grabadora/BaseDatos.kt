@@ -9,7 +9,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Los audios y las marcas siguen en Descargas/GrabadoraClases; aquí solo se guarda
  * a qué curso pertenece cada uno y lo que cuesta calcular (cuántas marcas tiene).
  */
-class BaseDatos private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "grabadora.db", null, 1) {
+class BaseDatos private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "grabadora.db", null, 2) {
 
     companion object {
         @Volatile private var instancia: BaseDatos? = null
@@ -51,12 +51,14 @@ class BaseDatos private constructor(ctx: Context) : SQLiteOpenHelper(ctx, "graba
                 bytes INTEGER NOT NULL DEFAULT 0,
                 marcas_uri TEXT,
                 marcas_firma INTEGER,
-                num_marcas INTEGER NOT NULL DEFAULT 0)"""
+                num_marcas INTEGER NOT NULL DEFAULT 0,
+                tema TEXT)"""
         )
         db.execSQL("CREATE INDEX idx_grabaciones_curso ON grabaciones(curso_id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Versión 1: aún no hay migraciones
+        // 1 → 2: tema de la clase
+        if (oldVersion < 2) db.execSQL("ALTER TABLE grabaciones ADD COLUMN tema TEXT")
     }
 }

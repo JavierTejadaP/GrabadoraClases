@@ -2,13 +2,12 @@ package pe.javier.grabadora
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.text.format.DateFormat
 import android.view.ActionMode
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -28,14 +27,12 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Grabaciones de un curso, de la más reciente a la más antigua.
  * Toque: abre el reproductor.
  * Mantener presionado: seleccionar varias para compartir o borrar.
+ * Menú: exportar todo el curso en un ZIP.
  */
 class GrabacionesActivity : Activity() {
 
@@ -43,18 +40,14 @@ class GrabacionesActivity : Activity() {
         /** Id del curso; -1 = grabaciones libres. */
         const val EXTRA_CURSO_ID = "curso_id"
         private const val REQ_BORRAR = 10
+        private const val REQ_EXPORTAR = 11
         private const val M_COMPARTIR = 1
         private const val M_BORRAR = 2
         private const val M_TODO = 3
+        private const val M_EXPORTAR = 4
     }
 
-    private val loc = Locale.getDefault()
-    private val fmtFecha = SimpleDateFormat(DateFormat.getBestDateTimePattern(loc, "EEEEdMMMMyyyy"), loc)
-    private val fmtDia = SimpleDateFormat("d", loc)
-    private val fmtMes = SimpleDateFormat("MMM", loc)
-    private val fmtSemana = SimpleDateFormat("EEEE", loc)
-    private lateinit var fmtHora: java.text.DateFormat
-
+    private lateinit var vista: VistaGrabacion
     private var cursoId: Long? = null
     private lateinit var lista: ListView
     private var items: List<Grabacion> = emptyList()
@@ -62,7 +55,7 @@ class GrabacionesActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        fmtHora = DateFormat.getTimeFormat(this)
+        vista = VistaGrabacion(this)
         cursoId = intent.getLongExtra(EXTRA_CURSO_ID, -1L).takeIf { it >= 0 }
         title = Horario.curso(cursoId)?.nombre ?: getString(R.string.grabaciones_libres)
         actionBar?.setDisplayHomeAsUpEnabled(true)
@@ -87,7 +80,7 @@ class GrabacionesActivity : Activity() {
         lista.emptyView = vacio
         setContentView(root)
 
-        lista.setOnItemClickListener { _, _, pos, _ -> items.getOrNull(pos)?.let { abrir(it) } }
+        lista.setOnItemClickListener { _, _, pos, _ -> items.getOrNull(pos)?.let { vista.abrir(this, it) } }
 
         lista.choiceMode = ListView.CHOICE_MODE_MULTIPLE_MODAL
         lista.setMultiChoiceModeListener(object : AbsListView.MultiChoiceModeListener {
@@ -144,36 +137,18 @@ class GrabacionesActivity : Activity() {
 
     private fun mostrar(nuevas: List<Grabacion>) {
         items = nuevas
-        val color = ColorStateList.valueOf(Horario.color(Horario.curso(cursoId)))
         lista.adapter = object : BaseAdapter() {
             override fun getCount() = items.size
             override fun getItem(position: Int) = items[position]
             override fun getItemId(position: Int) = position.toLong()
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val v = convertView ?: LayoutInflater.from(parent.context).inflate(R.layout.item_grabacion, parent, false)
-                val g = items[position]
-                val fecha = Date(g.fechaMs)
-                v.findViewById<View>(R.id.bloqueFecha).backgroundTintList = color
-                v.findViewById<TextView>(R.id.tvDia).text = fmtDia.format(fecha)
-                v.findViewById<TextView>(R.id.tvMes).text = fmtMes.format(fecha).uppercase(loc).removeSuffix(".")
-                v.findViewById<TextView>(R.id.tvTitulo).text =
-                    if (g.curso == null) mayuscula(fmtFecha.format(fecha))
-                    else getString(R.string.tipo_y_dia, Horario.etiquetaTipo(this@GrabacionesActivity, g.tipo), mayuscula(fmtSemana.format(fecha)))
-                v.findViewById<TextView>(R.id.tvDetalle).text = getString(
-                    R.string.detalle_grabacion,
-                    fmtHora.format(fecha),
-                    Biblioteca.fmtDuracion(this@GrabacionesActivity, g.duracionAproxMs),
-                    Biblioteca.fmtTamano(g.bytes)
-                )
-                val tvM = v.findViewById<TextView>(R.id.tvMarcas)
-                tvM.visibility = if (g.numMarcas > 0) View.VISIBLE else View.GONE
-                tvM.text = g.numMarcas.toString()
+                vista.pintar(v, items[position], conCurso = false)
                 return v
             }
         }
+        invalidateOptionsMenu()
     }
-
-    private fun mayuscula(s: String) = s.replaceFirstChar { it.titlecase(loc) }
 
     private fun seleccionados(): List<Grabacion> {
         val c = lista.checkedItemPositions ?: return emptyList()
@@ -182,20 +157,6 @@ class GrabacionesActivity : Activity() {
     }
 
     // ---------------- acciones ----------------
-
-    private fun abrir(g: Grabacion) {
-        val fecha = Date(g.fechaMs)
-        startActivity(
-            Intent(this, ReproductorActivity::class.java)
-                .putExtra(ReproductorActivity.EXTRA_URI, g.uri.toString())
-                .putExtra(ReproductorActivity.EXTRA_NOMBRE, g.nombre)
-                .putExtra(ReproductorActivity.EXTRA_TITULO, Horario.etiqueta(this, g.curso, g.tipo))
-                .putExtra(ReproductorActivity.EXTRA_SUBTITULO, getString(R.string.fecha_y_hora, mayuscula(fmtFecha.format(fecha)), fmtHora.format(fecha)))
-                .putExtra(ReproductorActivity.EXTRA_MARCAS, g.marcasUri?.toString())
-                .putExtra(ReproductorActivity.EXTRA_BYTES, g.bytes)
-                .putExtra(ReproductorActivity.EXTRA_CURSO_ID, g.curso?.id ?: -1L)
-        )
-    }
 
     private fun compartir(sel: List<Grabacion>) {
         if (sel.isEmpty()) return
@@ -234,16 +195,73 @@ class GrabacionesActivity : Activity() {
             .show()
     }
 
+    // ---------------- exportar ----------------
+
+    private fun elegirDestinoZip() {
+        val nombre = getString(R.string.zip_nombre, Horario.sinTildes(title.toString()))
+        try {
+            startActivityForResult(
+                Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/zip")
+                    .putExtra(Intent.EXTRA_TITLE, nombre),
+                REQ_EXPORTAR
+            )
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.error_selector_carpetas, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun exportar(destino: Uri) {
+        val lista = items
+        val dialogo = AlertDialog.Builder(this)
+            .setTitle(R.string.exportando)
+            .setMessage(getString(R.string.exportando_n, 0, lista.size))
+            .setCancelable(false)
+            .show()
+        val ctx = applicationContext
+        MainScope().launch {
+            val resultado = withContext(Dispatchers.IO) {
+                runCatching {
+                    Exportar.zip(ctx, lista, destino) { hechas, total ->
+                        runOnUiThread { dialogo.setMessage(getString(R.string.exportando_n, hechas, total)) }
+                    }
+                }
+            }
+            if (!isDestroyed) runCatching { dialogo.dismiss() }
+            resultado
+                .onSuccess { n -> Toast.makeText(ctx, resources.getQuantityString(R.plurals.exportadas, n, n), Toast.LENGTH_LONG).show() }
+                .onFailure { e -> Toast.makeText(ctx, getString(R.string.error_exportar, e.message ?: ""), Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    // ---------------- resultados / menú ----------------
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_BORRAR) cargar()
+        when (requestCode) {
+            REQ_BORRAR -> cargar()
+            REQ_EXPORTAR -> if (resultCode == RESULT_OK) data?.data?.let { exportar(it) }
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(0, M_EXPORTAR, 0, R.string.exportar_zip)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(M_EXPORTAR)?.isEnabled = items.isNotEmpty()
+        return super.onPrepareOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        if (item.itemId == android.R.id.home) {
-            finish()
-            return true
+        when (item.itemId) {
+            android.R.id.home -> finish()
+            M_EXPORTAR -> elegirDestinoZip()
+            else -> return super.onOptionsItemSelected(item)
         }
-        return super.onOptionsItemSelected(item)
+        return true
     }
 }
