@@ -24,6 +24,8 @@ para volver a ellos después.
 - **Buscador**: en *Mis grabaciones*, por tema, curso, tipo o fecha, sin importar tildes.
 - **Ajustes rápidos**: botón *Grabar clase* en el panel que se baja desde arriba
   (edítalo con el lápiz del panel para agregarlo).
+- **Enviadas**: lo que compartes (a Drive, WhatsApp…) queda marcado "☁ enviada" al elegir la
+  app; *Mis grabaciones* avisa cuántas faltan pasar a la laptop y las envía todas de una vez.
 - **Exportar curso**: un ZIP con todas las grabaciones del curso, sus marcas y un índice,
   guardado donde elijas (Descargas, Drive…).
 

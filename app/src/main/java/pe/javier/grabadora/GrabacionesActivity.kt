@@ -45,6 +45,7 @@ class GrabacionesActivity : Activity() {
         private const val M_BORRAR = 2
         private const val M_TODO = 3
         private const val M_EXPORTAR = 4
+        private const val M_ENVIADAS = 5
     }
 
     private lateinit var vista: VistaGrabacion
@@ -88,6 +89,7 @@ class GrabacionesActivity : Activity() {
                 menu?.add(0, M_COMPARTIR, 0, R.string.compartir)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
                 menu?.add(0, M_BORRAR, 1, R.string.borrar)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
                 menu?.add(0, M_TODO, 2, R.string.todas)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                menu?.add(0, M_ENVIADAS, 3, R.string.marcar_enviadas)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
                 return true
             }
 
@@ -102,6 +104,10 @@ class GrabacionesActivity : Activity() {
                     }
                     M_BORRAR -> confirmarBorrar(sel) { mode?.finish() }
                     M_TODO -> for (i in items.indices) lista.setItemChecked(i, true)
+                    M_ENVIADAS -> {
+                        alternarEnviadas(sel)
+                        mode?.finish()
+                    }
                 }
                 return true
             }
@@ -118,6 +124,11 @@ class GrabacionesActivity : Activity() {
     override fun onStart() {
         super.onStart()
         scope = MainScope()
+    }
+
+    /** Al volver de compartir (el menú de compartir no detiene esta pantalla) se ve la marca de enviada. */
+    override fun onResume() {
+        super.onResume()
         cargar()
     }
 
@@ -158,17 +169,20 @@ class GrabacionesActivity : Activity() {
 
     // ---------------- acciones ----------------
 
-    private fun compartir(sel: List<Grabacion>) {
+    private fun compartir(sel: List<Grabacion>) = Envios.compartir(this, sel)
+
+    /** Si todas las elegidas ya estaban enviadas, las desmarca; si no, las marca. */
+    private fun alternarEnviadas(sel: List<Grabacion>) {
         if (sel.isEmpty()) return
-        val uris = ArrayList<Uri>(sel.map { it.uri })
-        val i = if (uris.size == 1) {
-            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
-        } else {
-            Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-        }
-        i.type = "audio/*"
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, getString(R.string.compartir)))
+        val marcar = !sel.all { it.enviada }
+        Biblioteca.marcarEnviadas(this, sel.map { it.nombre }, marcar)
+        val n = sel.size
+        Toast.makeText(
+            this,
+            resources.getQuantityString(if (marcar) R.plurals.marcadas_enviadas else R.plurals.marcadas_pendientes, n, n),
+            Toast.LENGTH_SHORT
+        ).show()
+        cargar()
     }
 
     private fun confirmarBorrar(sel: List<Grabacion>, alTerminar: () -> Unit) {

@@ -1,6 +1,7 @@
 package pe.javier.grabadora
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -47,6 +48,7 @@ class CursosActivity : Activity() {
     private lateinit var vista: VistaGrabacion
     private lateinit var etBuscar: EditText
     private lateinit var tvSinResultados: TextView
+    private lateinit var tvPendientes: TextView
     private lateinit var lista: ListView
     private lateinit var tvRecuperar: TextView
     private var todas: List<Grabacion> = emptyList()
@@ -77,6 +79,15 @@ class CursosActivity : Activity() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
                 override fun afterTextChanged(s: Editable?) = pintarLista()
             })
+        }
+        tvPendientes = TextView(this).apply {
+            textSize = 14f
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(getColor(R.color.marca))
+            background = getDrawable(R.drawable.bg_chip)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            visibility = View.GONE
+            setOnClickListener { ofrecerEnviarPendientes() }
         }
         tvSinResultados = TextView(this).apply {
             setText(R.string.sin_resultados)
@@ -111,6 +122,9 @@ class CursosActivity : Activity() {
             addView(etBuscar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 setMargins(dp(16), dp(8), dp(16), dp(4))
             })
+            addView(tvPendientes, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(dp(16), dp(4), dp(16), dp(4))
+            })
             addView(tvSinResultados)
             addView(lista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
@@ -138,7 +152,37 @@ class CursosActivity : Activity() {
     override fun onStart() {
         super.onStart()
         scope = MainScope()
+    }
+
+    /** Al volver de compartir (el menú de compartir no detiene esta pantalla) se actualizan las pendientes. */
+    override fun onResume() {
+        super.onResume()
         cargar()
+    }
+
+    // ---------------- pendientes de pasar a la laptop ----------------
+
+    private fun pendientes() = todas.filter { !it.enviada }
+
+    private fun pintarPendientes() {
+        val n = pendientes().size
+        tvPendientes.visibility = if (n > 0 && !buscando()) View.VISIBLE else View.GONE
+        tvPendientes.text = resources.getQuantityString(R.plurals.pendientes_banner, n, n)
+    }
+
+    private fun ofrecerEnviarPendientes() {
+        val lista = pendientes()
+        if (lista.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle(resources.getQuantityString(R.plurals.pendientes_titulo, lista.size, lista.size))
+            .setMessage(R.string.pendientes_mensaje)
+            .setPositiveButton(R.string.pendientes_enviar) { _, _ -> Envios.compartir(this, lista) }
+            .setNeutralButton(R.string.pendientes_ya_pase) { _, _ ->
+                Biblioteca.marcarEnviadas(this, lista.map { it.nombre })
+                cargar()
+            }
+            .setNegativeButton(R.string.cancelar, null)
+            .show()
     }
 
     override fun onStop() {
@@ -170,6 +214,7 @@ class CursosActivity : Activity() {
 
     /** Cursos, o resultados de búsqueda si hay algo escrito. */
     private fun pintarLista() {
+        pintarPendientes()
         if (buscando()) {
             val consulta = etBuscar.text.toString()
             resultados = todas.filter { Biblioteca.coincide(vista.textosBusqueda(it), consulta) }

@@ -269,13 +269,7 @@ class ReproductorActivity : Activity() {
 
     // ---------------- compartir / menú ----------------
 
-    private fun compartir() {
-        val i = Intent(Intent.ACTION_SEND)
-            .putExtra(Intent.EXTRA_STREAM, uri)
-            .setType("audio/*")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(i, getString(R.string.compartir)))
-    }
+    private fun compartir() = Envios.compartir(this, listOf(uri), listOf(nombre))
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, M_ABRIR, 0, R.string.abrir_con_otra_app)

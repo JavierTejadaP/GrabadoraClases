@@ -217,4 +217,29 @@
         <item quantity="one">Se exportó %d grabación</item>
         <item quantity="other">Se exportaron %d grabaciones</item>
     </plurals>
+
+    <!-- Enviadas a la laptop -->
+    <string name="marca_enviada">☁ enviada</string>
+    <string name="busqueda_enviada">enviada</string>
+    <string name="busqueda_pendiente">pendiente sin enviar</string>
+    <string name="marcar_enviadas">Marcar enviadas / pendientes</string>
+    <string name="pendientes_mensaje">Elige Drive y la carpeta GrabadoraClases: en la laptop, \"Procesar clases de Drive\" las guarda en su semana y las transcribe.</string>
+    <string name="pendientes_enviar">Enviar</string>
+    <string name="pendientes_ya_pase">Ya las pasé</string>
+    <plurals name="pendientes_banner">
+        <item quantity="one">☁ %d grabación sin pasar a la laptop · Enviar</item>
+        <item quantity="other">☁ %d grabaciones sin pasar a la laptop · Enviar</item>
+    </plurals>
+    <plurals name="pendientes_titulo">
+        <item quantity="one">%d grabación sin enviar</item>
+        <item quantity="other">%d grabaciones sin enviar</item>
+    </plurals>
+    <plurals name="marcadas_enviadas">
+        <item quantity="one">%d marcada como enviada</item>
+        <item quantity="other">%d marcadas como enviadas</item>
+    </plurals>
+    <plurals name="marcadas_pendientes">
+        <item quantity="one">%d marcada como pendiente</item>
+        <item quantity="other">%d marcadas como pendientes</item>
+    </plurals>
 </resources>

@@ -51,6 +51,7 @@ class VistaGrabacion(private val ctx: Context) {
         partes.add(fmtHora.format(fecha))
         partes.add(Biblioteca.fmtDuracion(ctx, g.duracionAproxMs))
         if (!conCurso) partes.add(Biblioteca.fmtTamano(g.bytes))
+        if (g.enviada) partes.add(ctx.getString(R.string.marca_enviada))
 
         v.findViewById<TextView>(R.id.tvTitulo).text = g.tema ?: base(g)
         v.findViewById<TextView>(R.id.tvDetalle).text = partes.joinToString(" · ")
@@ -68,6 +69,7 @@ class VistaGrabacion(private val ctx: Context) {
             Horario.etiquetaTipo(ctx, g.tipo),
             fmtFecha.format(fecha),
             fmtCorta.format(fecha),
+            ctx.getString(if (g.enviada) R.string.busqueda_enviada else R.string.busqueda_pendiente),
         )
     }
 

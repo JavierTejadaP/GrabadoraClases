@@ -23,6 +23,8 @@ data class Grabacion(
     val marcasUri: Uri?,
     val numMarcas: Int,
     val tema: String? = null,
+    /** Ya se compartió (a Drive u otra app) para pasarla a la laptop. */
+    val enviada: Boolean = false,
 ) {
     /** Estimada por tamaño: se graba a 48 kbps. */
     val duracionAproxMs: Long get() = bytes * 8 * 1000 / 48000
@@ -127,7 +129,7 @@ object Biblioteca {
         val actual = archivoActual()
         val lista = mutableListOf<Grabacion>()
         BaseDatos.de(ctx).readableDatabase.rawQuery(
-            "SELECT id, uri, archivo, curso_id, tipo, fecha_ms, bytes, marcas_uri, num_marcas, tema " +
+            "SELECT id, uri, archivo, curso_id, tipo, fecha_ms, bytes, marcas_uri, num_marcas, tema, enviada " +
                 "FROM grabaciones ORDER BY fecha_ms DESC", null
         ).use { c ->
             while (c.moveToNext()) {
@@ -145,6 +147,7 @@ object Biblioteca {
                         marcasUri = c.getString(7)?.let { Uri.parse(it) },
                         numMarcas = c.getInt(8),
                         tema = c.getString(9)?.takeIf { it.isNotBlank() },
+                        enviada = c.getInt(10) != 0,
                     )
                 )
             }
@@ -240,6 +243,22 @@ object Biblioteca {
         val v = ContentValues().apply { put("tema", tema?.trim()?.takeIf { it.isNotEmpty() }) }
         runCatching {
             BaseDatos.de(ctx).writableDatabase.update("grabaciones", v, "archivo = ?", arrayOf(archivo))
+        }
+    }
+
+    /** Marca (o desmarca) grabaciones como ya pasadas a la laptop. */
+    fun marcarEnviadas(ctx: Context, archivos: Collection<String>, enviada: Boolean = true) {
+        if (archivos.isEmpty()) return
+        val db = BaseDatos.de(ctx).writableDatabase
+        val v = ContentValues().apply { put("enviada", if (enviada) 1 else 0) }
+        runCatching {
+            db.beginTransaction()
+            try {
+                for (a in archivos) db.update("grabaciones", v, "archivo = ?", arrayOf(a))
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
         }
     }
 

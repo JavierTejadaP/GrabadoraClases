@@ -97,5 +97,10 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- Marca como enviadas las grabaciones compartidas (lo llama el menú de compartir) -->
+        <receiver
+            android:name=".EnviadasReceiver"
+            android:exported="false" />
     </application>
 </manifest>
